@@ -18,7 +18,7 @@
  * Licence : MIT
  */
 
-const CARD_VERSION = "0.1.7";
+const CARD_VERSION = "0.1.8";
 
 if (typeof console !== "undefined" && typeof console.info === "function") {
   console.info(
@@ -34,14 +34,17 @@ if (typeof console !== "undefined" && typeof console.info === "function") {
  * en runs horizontaux classés par y croissant (origine y = bas de l'image).
  * ------------------------------------------------------------------ */
 const LAYER = {
-  FLOOR: 0,        // sol cartographié hors pièces
+  OUTSIDE: 0,      // hors carte : jamais dessiné (sémantique MapPixelType)
   SEGMENT_MIN: 1,  // 1..62 : pixels de pièce (clé = identifiant de segment)
-  SEGMENT_MAX: 62,
-  OUTLINE_MIN: 101, // 101..162 : pixels de contour, pièce = clé - 100
+  SEGMENT_MAX: 62, // (2..14 = types wifi d'une camera wifi : jamais branchée ici)
+  OUTLINE_MIN: 101, // 101..162 : pixels de contour, pièce = clé - 100 (100+segment_id)
   OUTLINE_MAX: 162,
-  OBSTACLE_MIN: 201, // 201..231 : meubles/obstacles délimités
-  OBSTACLE_MAX: 231,
-  CARPET: 512,     // pixels de tapis
+  OBSTACLE_WALL: 251, // pixels d'obstacle
+  DIRTY_AREA: 250, // zones sales : ignoré (pas d'échelle de teinte)
+  CLEAN_AREA: 249, // ignoré idem
+  UNKNOWN: 252,    // ignoré
+  NEW_SEGMENT: 253, // ignoré
+  FLOOR: 254,      // sol cartographié hors pièces
   WALL: 255,       // murs (fines bordures autour des pièces)
 };
 
@@ -70,6 +73,7 @@ const COLORS = {
   floor: "#ece9e1",
   wall: "#9aa0a6",
   carpet: "rgba(178, 132, 84, 0.30)",
+  carpetStroke: "rgba(178, 132, 84, 0.6)",
   obstacle: "#5c636e",
   path: "#1e88e5",
   pathMove: "#90a4ae",
@@ -970,7 +974,6 @@ class DreameOpenMapCard extends HTMLElement {
 
     const floor = colorParts(this._colors.floor, [236, 233, 225]);
     const wall = colorParts(this._colors.wall, [154, 160, 166]);
-    const carpet = parseCssColor(this._colors.carpet, [178, 132, 84, 0.3]);
     const obstacle = colorParts(this._colors.obstacle, [92, 99, 110]);
 
     for (const key of Object.keys(g.layers)) {
@@ -980,8 +983,6 @@ class DreameOpenMapCard extends HTMLElement {
       const runs = g.layers[key];
       if (layer === LAYER.FLOOR) {
         this._paintRuns(ctx, runs, floor[0], floor[1], floor[2], 1);
-      } else if (layer === LAYER.CARPET) {
-        continue; // dessiné au-dessus des pièces
       } else if (layer >= LAYER.SEGMENT_MIN && layer <= LAYER.SEGMENT_MAX) {
         const rgb = colorParts(g.segmentColor(layer), [200, 210, 220]);
         this._paintRuns(ctx, runs, rgb[0], rgb[1], rgb[2], 1);
@@ -989,13 +990,11 @@ class DreameOpenMapCard extends HTMLElement {
         this._paintRuns(ctx, runs, wall[0], wall[1], wall[2], 1, 0.25, 1.5);
       } else if (layer === LAYER.WALL) {
         this._paintRuns(ctx, runs, wall[0], wall[1], wall[2], 1, 0.25, 1.5);
-      } else if (layer >= LAYER.OBSTACLE_MIN && layer <= LAYER.OBSTACLE_MAX) {
+      } else if (layer === LAYER.OBSTACLE_WALL) {
         this._paintRuns(ctx, runs, obstacle[0], obstacle[1], obstacle[2], 1);
       }
+      // OUTSIDE(0), wifi(2..14), 249/250/252/253 : ignorés, sémantique non applicable
     }
-
-    // tapis (translucide)
-    this._paintRuns(ctx, g.layers[LAYER.CARPET] || [], carpet[0], carpet[1], carpet[2], carpet[3] === undefined ? 1 : carpet[3]);
 
     // surbrillance : segments actifs (robot en cours) et sélection
     const hi = (ids, rgb, a) => {
@@ -1042,7 +1041,7 @@ class DreameOpenMapCard extends HTMLElement {
     }
     for (const c of g.carpets || []) {
       if (Array.isArray(c) && c.length >= 8) {
-        this._strokeQuad(ctx, c.slice(0, 8).map(Number), "rgba(178,132,84,0.18)", "rgba(178,132,84,0.6)", conv, true);
+        this._strokeQuad(ctx, c.slice(0, 8).map(Number), this._colors.carpet, this._colors.carpetStroke, conv, true);
       }
     }
     for (const z of g.noGo || []) {
