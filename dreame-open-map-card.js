@@ -18,7 +18,7 @@
  * Licence : MIT
  */
 
-const CARD_VERSION = "0.1.4";
+const CARD_VERSION = "0.1.5";
 
 if (typeof console !== "undefined" && typeof console.info === "function") {
   console.info(
@@ -485,7 +485,9 @@ class DreameOpenMapCard extends HTMLElement {
           border: 0; border-radius: 999px; padding: 5px 12px;
           font: inherit; font-size: .8rem; cursor: pointer;
           color: var(--primary-text-color, #333);
+          user-select: none; -webkit-user-select: none;
         }
+        button:disabled { opacity: .38; cursor: default; }
         .toolbar button.active {
           background: var(--primary-color, #1e88e5);
           color: var(--primary-text-color, #fff);
@@ -498,6 +500,8 @@ class DreameOpenMapCard extends HTMLElement {
           border: 1px solid var(--divider-color, rgba(0,0,0,.12));
           background: transparent; color: var(--primary-text-color, #333);
           border-radius: 999px; padding: 3px 10px; font: inherit; font-size: .78rem; cursor: pointer;
+          max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+          user-select: none; -webkit-user-select: none;
         }
         .chips button.selected {
           background: var(--primary-color, #1e88e5);
@@ -583,6 +587,9 @@ class DreameOpenMapCard extends HTMLElement {
   _setMode(mode) {
     this._mode = mode;
     if (mode !== "rooms") this._selectedRooms.clear();
+    // pas de zombies : les zones/points en attente n'appartiennent qu'à leur mode
+    this._pendingZones = [];
+    this._pendingPoints = [];
     this._drag = null;
     this._buildChips();
     this._buildActions();
@@ -606,6 +613,7 @@ class DreameOpenMapCard extends HTMLElement {
     for (const seg of this._geom.visibleSegments) {
       const b = document.createElement("button");
       b.textContent = seg.name || `Pièce ${seg.id}`;
+      b.title = b.textContent;
       b.classList.toggle("selected", this._selectedRooms.has(seg.id));
       b.addEventListener("click", () => {
         if (this._selectedRooms.has(seg.id)) this._selectedRooms.delete(seg.id);
@@ -621,10 +629,11 @@ class DreameOpenMapCard extends HTMLElement {
     const row = this.shadowRoot.querySelector(".actions");
     if (!row) return;
     row.innerHTML = "";
-    const mkBtn = (label, fn, ghost) => {
+    const mkBtn = (label, fn, ghost, disabled) => {
       const b = document.createElement("button");
       b.textContent = label;
       if (ghost) b.classList.add("ghost");
+      b.disabled = !!disabled;
       b.addEventListener("click", fn);
       row.append(b);
       return b;
@@ -648,7 +657,7 @@ class DreameOpenMapCard extends HTMLElement {
           segments: [...this._selectedRooms],
           repeats: this._repeats,
         });
-      });
+      }, false, !this._selectedRooms.size);
       if (this._selectedRooms.size) {
         mkBtn("Tout désélect.", () => {
           this._selectedRooms.clear();
@@ -665,7 +674,7 @@ class DreameOpenMapCard extends HTMLElement {
         this._scheduleRender();
       }, true);
     } else if (this._mode === "goto") {
-      mkBtn("Aller au point", () => this._gotoLast());
+      mkBtn("Aller au point", () => this._gotoLast(), false, !this._pendingPoints.length);
       mkBtn("Effacer", () => {
         this._pendingPoints = [];
         this._scheduleRender();
@@ -677,7 +686,7 @@ class DreameOpenMapCard extends HTMLElement {
         this._callService("vacuum_follow_path", { points: pts });
         this._pendingPoints = [];
         this._scheduleRender();
-      });
+      }, false, !this._pendingPoints.length);
       mkBtn("Effacer", () => {
         this._pendingPoints = [];
         this._scheduleRender();
