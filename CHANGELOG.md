@@ -1,5 +1,13 @@
 # Historique des versions
 
+## v0.3.3
+- **Chips → bouton actif** : sélectionner une pièce via sa pastille activait bien le surlignage mais laissait « Nettoyer la sélection » désactivé et « Tout désélect. » invisible — les boutons sont désormais reconstruits à chaque changement de sélection.
+- **Rotation de la carte** : `size[7]` (rotation réglable via le sélecteur `map_rotation` de l'intégration) est désormais appliquée au rendu (90/180/270°, comme le renderer officiel), y compris le mapping inverse du pointeur et les étiquettes.
+- **Pièces invisibles** : un clic sur la zone d'une pièce cachée (`visibility: false`) ou non cartographiée ne peut plus la sélectionner (elle serait partie au nettoyage sans être visible) ; son étiquette n'est plus dessinée.
+- **Récupération réseau blindée** : jamais deux requêtes en vol (garde `_fetching` sur tous les chemins) et garde-fou de 20 s — une connexion qui traîne n'immobilise plus la carte.
+- **Batterie** : l'icône n'est plus reconstruite à chaque poussée `hass` (signature de changement), retour propre après une valeur indisponible.
+- **Hint « Aller à »** : texte aligné sur le comportement réel (un point).
+
 ## v0.3.2
 - **Autocomplétion réparée** : remplacement du `<datalist>` natif (qui ne s'affiche pas dans un shadow DOM sous Chromium) par un dropdown maison — filtrage live, navigation clavier (flèches / Entrée / Échap), clic pour appliquer.
 - Correctifs v0.3.1 reconduits : YAML existant préservé (`type`, `colors`…) dans `config-changed`, champ en cours de saisie non écrasé.

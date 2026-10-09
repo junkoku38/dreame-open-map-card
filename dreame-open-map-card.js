@@ -18,7 +18,7 @@
  * Licence : MIT
  */
 
-const CARD_VERSION = "0.3.2";
+const CARD_VERSION = "0.3.3";
 
 if (typeof console !== "undefined" && typeof console.info === "function") {
   console.info(
@@ -96,7 +96,7 @@ const COLORS = {
 const MODE_HINTS = {
   rooms: "Sélectionne des pièces (clic sur la carte ou sur les pastilles), puis « Nettoyer la sélection ».",
   zone: "Dessine un ou plusieurs rectangles à la souris/doigt, puis « Nettoyer la zone ».",
-  goto: "Pose un ou plusieurs points puis « Aller au dernier point ».",
+  goto: "Clique sur la carte pour poser un point, puis « Aller au point ».",
   follow: "Relie des points avec des clics successifs, puis « Suivre le chemin ».",
 };
 
@@ -197,7 +197,9 @@ class MapGeometry {
     this.width = Math.max(1, Math.round(Number(size[4]) || 1));
     this.height = Math.max(1, Math.round(Number(size[5]) || 1));
     this.grid = Number(size[6]) || 50;  // mm par pixel (protocole Dreame : toujours 50)
-    this.rotation = Number(size[7]) || 0;
+    // rotation de la carte (0/90/180/270) — le renderer officiel transpose
+    // l'image finale de map_data.rotation degrés (map.py get_data : size[7])
+    this.rotation = (((Number(size[7]) || 0) % 360) + 360) % 360;
     this.frameId = (data && data.frame_id) || 0;
     this.version = Number(data && data.version) || 0;
 
@@ -436,10 +438,19 @@ class DreameOpenMapCard extends HTMLElement {
 
   async _fetchData() {
     if (!this._hass || !this._config) return;
+    // jamais deux récupérations simultanées : une requête lente ne doit ni
+    // s'empiler ni laisser la carte muette pendant des heures
+    if (this._fetching) return;
     this._fetching = true;
     this._lastFetchAt = Date.now();
+    // garde-fou : une connexion qui traîne est abandonnée (sinon _fetching
+    // resterait vrai pour toujours et la carte ne se mettrait plus à jour)
+    const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const watchdog = ctrl ? setTimeout(() => {
+      try { ctrl.abort(); } catch (e) { /* déjà terminée */ }
+    }, 20000) : null;
     try {
-      const json = await this._requestData();
+      const json = await this._requestData(ctrl ? ctrl.signal : undefined);
       this._mapData = json && json.empty_map ? null : json;
       this._geom = this._mapData ? new MapGeometry(this._mapData, this._segmentColors) : null;
       this._error = null;
@@ -449,6 +460,7 @@ class DreameOpenMapCard extends HTMLElement {
       // ralentit en cas d'échec répété
       this._lastFetchAt = Date.now() + this._integratedUpdateMs();
     } finally {
+      if (watchdog) clearTimeout(watchdog);
       this._fetching = false;
       if (this._geom && this._geom.frameId !== this._lastFrameId) {
         this._lastFrameId = this._geom.frameId;
@@ -464,14 +476,14 @@ class DreameOpenMapCard extends HTMLElement {
     }
   }
 
-  async _requestData() {
+  async _requestData(signal) {
     const entity = encodeURIComponent(this._config.camera);
     // le serveur pose "Cache-Control: immutable" : cache-buster obligatoire
     const url = new URL(`/api/camera_map_data_proxy/${entity}`, location);
     url.searchParams.set("ts", String(Date.now()));
     const stages = [];
     try {
-      const resp = await this._hass.fetchWithAuth(url.toString());
+      const resp = await this._hass.fetchWithAuth(url.toString(), signal ? { signal } : undefined);
       if (!resp.ok) {
         throw new Error(
           `HTTP ${resp.status} sur /api/camera_map_data_proxy` +
@@ -704,6 +716,9 @@ class DreameOpenMapCard extends HTMLElement {
         if (this._selectedRooms.has(seg.id)) this._selectedRooms.delete(seg.id);
         else this._selectedRooms.add(seg.id);
         b.classList.toggle("selected", this._selectedRooms.has(seg.id));
+        // les boutons d'action dépendent de la sélection (activer « Nettoyer
+        // la sélection », montrer « Tout désélect. ») : les reconstruire
+        this._buildActions();
         this._scheduleRender();
       });
       wrap.append(b);
@@ -832,23 +847,33 @@ class DreameOpenMapCard extends HTMLElement {
       const a = st && st.attributes ? st.attributes : null;
       const raw = a && a.battery_level != null ? a.battery_level : a && a.battery != null ? a.battery : null;
       const bat = raw == null ? NaN : Math.round(Number(raw));
-      batEl.textContent = "";
-      if (Number.isFinite(bat)) {
+      if (!Number.isFinite(bat)) {
+        batEl.textContent = "";
+        batEl.title = "";
+        batEl._sig = null; // une valeur valide ensuite doit reconstruire
+      } else {
         const pct = Math.max(0, Math.min(100, bat));
         const charging = st && st.state === "docked" && pct < 100;
-        const step = Math.max(10, Math.round(pct / 10) * 10);
-        const icon =
-          charging ? `mdi:battery-charging-${Math.min(100, step)}`
-          : pct >= 95 ? "mdi:battery"
-          : `mdi:battery-${Math.max(10, Math.min(90, step))}`;
-        const ic = document.createElement("ha-icon");
-        ic.setAttribute("icon", icon);
-        ic.style.color = pct <= 20 ? "#e53935" : pct <= 50 ? "#ef6c00" : "";
-        const pctTxt = document.createElement("span");
-        pctTxt.textContent = ` ${pct} %`;
-        batEl.appendChild(ic);
-        batEl.appendChild(pctTxt);
-        batEl.title = charging ? `En charge — ${pct} %` : `Batterie ${pct} %`;
+        const sig = `${charging ? 1 : 0}|${pct}`;
+        // évite de reconstruire l'icône à chaque poussée hass (une fois par
+        // seconde et plus) : seul un vrai changement réaffiche
+        if (batEl._sig !== sig) {
+          batEl._sig = sig;
+          const step = Math.max(10, Math.round(pct / 10) * 10);
+          const icon =
+            charging ? `mdi:battery-charging-${Math.min(100, step)}`
+            : pct >= 95 ? "mdi:battery"
+            : `mdi:battery-${Math.max(10, Math.min(90, step))}`;
+          batEl.textContent = "";
+          const ic = document.createElement("ha-icon");
+          ic.setAttribute("icon", icon);
+          ic.style.color = pct <= 20 ? "#e53935" : pct <= 50 ? "#ef6c00" : "";
+          const pctTxt = document.createElement("span");
+          pctTxt.textContent = ` ${pct} %`;
+          batEl.appendChild(ic);
+          batEl.appendChild(pctTxt);
+          batEl.title = charging ? `En charge — ${pct} %` : `Batterie ${pct} %`;
+        }
       }
     }
     if (errEl) {
@@ -936,10 +961,24 @@ class DreameOpenMapCard extends HTMLElement {
     if (!g || !canvas) return null;
     const rect = canvas.getBoundingClientRect();
     if (!rect.width || !rect.height) return null;
-    const fx = (ev.clientX - rect.left) / rect.width * (g.width * this._scale);
-    const fy = (ev.clientY - rect.top) / rect.height * (g.height * this._scale);
-    const px = fx / this._scale;
-    const py = g.height - fy / this._scale;
+    const u = (ev.clientX - rect.left) / rect.width;
+    const v = (ev.clientY - rect.top) / rect.height;
+    // inverse de la rotation appliquée au rendu (u,v normalisés dans la vue)
+    const rot = g.rotation || 0;
+    let px, py;
+    if (rot === 90) {
+      px = g.width * (1 - v);
+      py = g.height * (1 - u);
+    } else if (rot === 180) {
+      px = g.width * (1 - u);
+      py = g.height * v;
+    } else if (rot === 270) {
+      px = g.width * (1 - v);
+      py = g.height * u;
+    } else {
+      px = g.width * u;
+      py = g.height * (1 - v);
+    }
     return [clampInt(px, 0, g.width - 1), clampInt(py, 0, g.height - 1)];
   }
 
@@ -991,18 +1030,28 @@ class DreameOpenMapCard extends HTMLElement {
     this._scheduleRender();
   }
 
-  /** id du segment raster sous le pixel (px,py) ou null. */
+  /** id du segment raster sous le pixel (px,py) ou null.
+   * Les pièces cachées (visibility=false) ou non cartographiées ne sont
+   * ni dessinées ni cliquables : sinon on pourrait sélectionner au clic
+   * une pièce invisible (et la nettoyer !). */
   _segmentAt(px, py) {
     const g = this._geom;
     if (!g) return null;
     for (const key of Object.keys(g.layers)) {
       const layer = Number(key);
+      let segId = null;
       if (layer >= LAYER.SEGMENT_MIN && layer <= LAYER.SEGMENT_MAX) {
-        if (this._runsContain(g.layers[key], px, py)) return layer;
+        segId = layer;
       } else if (layer >= LAYER.OUTLINE_MIN && layer <= LAYER.OUTLINE_MAX) {
-        const segId = layer - 100;
-        if (this._runsContain(g.layers[key], px, py)) return segId;
+        segId = layer - 100;
+      } else {
+        continue;
       }
+      if (!this._runsContain(g.layers[key], px, py)) continue;
+      if (g.hiddenSegments && g.hiddenSegments.has(segId)) continue;
+      const seg = g.segments[segId];
+      if (seg && seg.unmapped) continue;
+      return segId;
     }
     return null;
   }
@@ -1059,8 +1108,13 @@ class DreameOpenMapCard extends HTMLElement {
     // HiDPI : backing store multiplié par le devicePixelRatio, repère logique inchangé
     const dpr = Math.max(1, Math.min(2, (typeof window !== "undefined" && window.devicePixelRatio) || 1));
     this._dpr = dpr;
-    const W = Math.round(g.width * scale * dpr);
-    const H = Math.round(g.height * scale * dpr);
+    // rotation 90/270 : les dimensions affichées sont permutées
+    const rot = g.rotation || 0;
+    const swap = rot === 90 || rot === 270;
+    const RW = swap ? g.height : g.width;
+    const RH = swap ? g.width : g.height;
+    const W = Math.round(RW * scale * dpr);
+    const H = Math.round(RH * scale * dpr);
     if (canvas.width !== W) canvas.width = W;
     if (canvas.height !== H) canvas.height = H;
 
@@ -1072,8 +1126,22 @@ class DreameOpenMapCard extends HTMLElement {
     ctx.fillStyle = `rgb(${bg[0]},${bg[1]},${bg[2]})`;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // repère raster : x vers la droite, y vers le HAUT (origine en bas à gauche)
-    ctx.setTransform(scale * dpr, 0, 0, -scale * dpr, 0, H);
+    // repère raster : x vers la droite, y vers le HAUT (origine en bas à gauche),
+    // puis rotation affine de la carte (sens antihoraire, comme le renderer
+    // officiel : PIL ROTATE_90/180/270 sur l'image finale)
+    const s = scale * dpr;
+    let a = s, b = 0, c = 0, d = -s, e = 0, f = H;
+    if (rot === 90) {
+      // (x, y) -> (gH - y, x) : le haut part à gauche
+      a = 0; b = -s; c = -s; d = 0; e = s * g.height; f = s * g.width;
+    } else if (rot === 180) {
+      // (x, y) -> (gW - x, gH - y)
+      a = -s; b = 0; c = 0; d = s; e = s * g.width; f = 0;
+    } else if (rot === 270) {
+      // (x, y) -> (y, gW - x) : le haut part à droite
+      a = 0; b = s; c = s; d = 0; e = 0; f = 0;
+    }
+    ctx.setTransform(a, b, c, d, e, f);
 
     const floor = colorParts(this._colors.floor, [236, 233, 225]);
     const wall = colorParts(this._colors.wall, [154, 160, 166]);
@@ -1124,6 +1192,17 @@ class DreameOpenMapCard extends HTMLElement {
       this._drawRoomLabels(ctx, g);
       this._drawDeviceLabels(ctx, g);
     }
+  }
+
+  /** raster (y vers le haut) -> écran logique (y vers le bas), rotation incluse. */
+  _viewXY(px, py) {
+    const g = this._geom;
+    const sc = this._scale;
+    const rot = g.rotation || 0;
+    if (rot === 90) return [(g.height - py) * sc, (g.width - px) * sc];
+    if (rot === 180) return [(g.width - px) * sc, py * sc];
+    if (rot === 270) return [py * sc, (g.width - px) * sc];
+    return [px * sc, (g.height - py) * sc];
   }
 
   /** peint une couche de runs : [x, y, n, ...] ; y en unités raster.
@@ -1307,7 +1386,7 @@ class DreameOpenMapCard extends HTMLElement {
     ctx.shadowColor = "rgba(255,255,255,.85)";
     ctx.shadowBlur = 3;
     for (const seg of Object.values(g.segments)) {
-      if (seg.unmapped) continue;
+      if (seg.unmapped || seg.hidden) continue;
       let px, py;
       if (seg.bbox) {
         const [c1, c2] = g.vacToPixel(
@@ -1323,9 +1402,10 @@ class DreameOpenMapCard extends HTMLElement {
       }
       const label = seg.name;
       if (!label) continue;
-      const devX = px * scale;
-      const devY = (g.height - py) * scale;
-      if (devX < 8 || devX + 8 > g.width * scale || devY < 8 || devY + 8 > g.height * scale) continue;
+      const [devX, devY] = this._viewXY(px, py);
+      const VW = (g.rotation === 90 || g.rotation === 270 ? g.height : g.width) * scale;
+      const VH = (g.rotation === 90 || g.rotation === 270 ? g.width : g.height) * scale;
+      if (devX < 8 || devX + 8 > VW || devY < 8 || devY + 8 > VH) continue;
       ctx.fillText(label, devX, devY);
     }
     ctx.shadowBlur = 0;
@@ -1344,10 +1424,12 @@ class DreameOpenMapCard extends HTMLElement {
     const overlapped = robotPx && chargerPx &&
       Math.hypot(robotPx[0] - chargerPx[0], robotPx[1] - chargerPx[1]) < 5;
     if (robotPx) {
-      ctx.fillText("🤖", robotPx[0] * scale, (g.height - robotPx[1]) * scale);
+      const [rx, ry] = this._viewXY(robotPx[0], robotPx[1]);
+      ctx.fillText("🤖", rx, ry);
     }
     if (chargerPx && !overlapped) {
-      ctx.fillText("⚡", chargerPx[0] * scale, (g.height - chargerPx[1]) * scale - scale * 2);
+      const [cx, cy] = this._viewXY(chargerPx[0], chargerPx[1]);
+      ctx.fillText("⚡", cx, cy - scale * 2);
     }
   }
 }
