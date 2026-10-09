@@ -18,7 +18,15 @@
  * Licence : MIT
  */
 
-const CARD_VERSION = "0.1.0";
+const CARD_VERSION = "0.1.1";
+
+if (typeof console !== "undefined" && typeof console.info === "function") {
+  console.info(
+    "%c dreame-open-map-card %c v" + CARD_VERSION + " ",
+    "background:#1e88e5;color:#fff;border-radius:4px 0 0 4px;padding:2px 5px;",
+    "background:#43a047;color:#fff;border-radius:0 4px 4px 0;padding:2px 5px;"
+  );
+}
 
 /* ------------------------------------------------------------------ *
  * Sémantique des couches de pixels (contrat de données de l'intégration)
@@ -34,6 +42,7 @@ const LAYER = {
   OBSTACLE_MIN: 201, // 201..231 : meubles/obstacles délimités
   OBSTACLE_MAX: 231,
   CARPET: 512,     // pixels de tapis
+  WALL: 255,       // murs (fines bordures autour des pièces)
 };
 
 const SEGMENT_COLORS = [
@@ -913,6 +922,8 @@ class DreameOpenMapCard extends HTMLElement {
         const rgb = colorParts(g.segmentColor(layer), [200, 210, 220]);
         this._paintRuns(ctx, runs, rgb[0], rgb[1], rgb[2], 1);
       } else if (layer >= LAYER.OUTLINE_MIN && layer <= LAYER.OUTLINE_MAX) {
+        this._paintRuns(ctx, runs, wall[0], wall[1], wall[2], 1);
+      } else if (layer === LAYER.WALL) {
         this._paintRuns(ctx, runs, wall[0], wall[1], wall[2], 1);
       } else if (layer >= LAYER.OBSTACLE_MIN && layer <= LAYER.OBSTACLE_MAX) {
         this._paintRuns(ctx, runs, obstacle[0], obstacle[1], obstacle[2], 1);
