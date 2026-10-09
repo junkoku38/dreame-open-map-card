@@ -1,0 +1,6 @@
+{
+  "name": "Dreame Open Map Card",
+  "render_readme": true,
+  "hide_default_branch": false,
+  "homeassistant": "0.0.0"
+}
