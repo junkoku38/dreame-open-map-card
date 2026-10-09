@@ -18,7 +18,7 @@
  * Licence : MIT
  */
 
-const CARD_VERSION = "0.1.2";
+const CARD_VERSION = "0.1.3";
 
 if (typeof console !== "undefined" && typeof console.info === "function") {
   console.info(
@@ -223,7 +223,9 @@ class MapGeometry {
         };
       }
     }
-    this.visibleSegments = Object.values(this.segments).filter((s) => !s.unmapped);
+    this.visibleSegments = Object.values(this.segments)
+      .filter((s) => !s.unmapped)
+      .sort((a, b) => (a.order ?? a.id) - (b.order ?? b.id));
 
     this.activeSegments = (data && data.active_segments) || [];
     this.path = (data && data.path) || [];
@@ -749,14 +751,13 @@ class DreameOpenMapCard extends HTMLElement {
   }
 
   _cleanZones() {
-    if (!this._drag || !this._geom) {
-      if (!this._pendingZones.length) return;
-    }
+    const g = this._geom;
+    if (!g) return;
+    if (!this._pendingZones.length && !this._drag) return;
     const rects = [];
-    for (const r of this._pendingZones) {
+    for (const r of [...this._pendingZones, ...(this._drag ? [this._drag] : [])]) {
       rects.push(this._rectToVac(r));
     }
-    if (this._drag) rects.push(this._rectToVac(this._drag));
     if (!rects.length) return;
     this._callService("vacuum_clean_zone", { zone: rects, repeats: this._repeats });
     this._pendingZones = [];
@@ -942,9 +943,9 @@ class DreameOpenMapCard extends HTMLElement {
         const rgb = colorParts(g.segmentColor(layer), [200, 210, 220]);
         this._paintRuns(ctx, runs, rgb[0], rgb[1], rgb[2], 1);
       } else if (layer >= LAYER.OUTLINE_MIN && layer <= LAYER.OUTLINE_MAX) {
-        this._paintRuns(ctx, runs, wall[0], wall[1], wall[2], 1);
+        this._paintRuns(ctx, runs, wall[0], wall[1], wall[2], 1, 0.25, 1.5);
       } else if (layer === LAYER.WALL) {
-        this._paintRuns(ctx, runs, wall[0], wall[1], wall[2], 1);
+        this._paintRuns(ctx, runs, wall[0], wall[1], wall[2], 1, 0.25, 1.5);
       } else if (layer >= LAYER.OBSTACLE_MIN && layer <= LAYER.OBSTACLE_MAX) {
         this._paintRuns(ctx, runs, obstacle[0], obstacle[1], obstacle[2], 1);
       }
@@ -978,12 +979,14 @@ class DreameOpenMapCard extends HTMLElement {
     }
   }
 
-  /** peint une couche de runs : [x, y, n, ...] ; y en unités raster. */
-  _paintRuns(ctx, runs, r, gr, b, a) {
+  /** peint une couche de runs : [x, y, n, ...] ; y en unités raster.
+   * yPad/hMul : extension verticale (murs plus épais). */
+  _paintRuns(ctx, runs, r, gr, b, a, yPad = 0, hMul = 1) {
     if (!runs || !runs.length) return;
     ctx.fillStyle = a >= 1 ? `rgb(${r | 0},${gr | 0},${b | 0})` : `rgba(${r | 0},${gr | 0},${b | 0},${a})`;
     for (let i = 0; i + 2 < runs.length; i += 3) {
-      ctx.fillRect(runs[i], runs[i + 1], runs[i + 2], 1);
+      if (yPad || hMul !== 1) ctx.fillRect(runs[i], runs[i + 1] - yPad, runs[i + 2], hMul);
+      else ctx.fillRect(runs[i], runs[i + 1], runs[i + 2], 1);
     }
   }
 
@@ -1085,9 +1088,17 @@ class DreameOpenMapCard extends HTMLElement {
   }
 
   _drawMarkers(ctx, g) {
+    const robotPx = g.robot && g.robot.length >= 2
+      ? g.vacToPixel(Number(g.robot[0]), Number(g.robot[1])) : null;
+    const chargerPx = g.charger && g.charger.length >= 2
+      ? g.vacToPixel(Number(g.charger[0]), Number(g.charger[1])) : null;
+    // robot et base au même endroit (docké) : un seul marqueur combiné
+    const overlapped = robotPx && chargerPx &&
+      Math.hypot(robotPx[0] - chargerPx[0], robotPx[1] - chargerPx[1]) < 5;
+
     // chargeur
-    if (g.charger && g.charger.length >= 2) {
-      const [cx, cy] = g.vacToPixel(Number(g.charger[0]), Number(g.charger[1]));
+    if (chargerPx && !overlapped) {
+      const [cx, cy] = chargerPx;
       ctx.beginPath();
       ctx.arc(cx, cy, Math.max(1, 3), 0, Math.PI * 2);
       ctx.fillStyle = COLORS.charger;
@@ -1095,23 +1106,27 @@ class DreameOpenMapCard extends HTMLElement {
       ctx.strokeStyle = "#ffffff";
       ctx.lineWidth = 0.5;
       ctx.stroke();
-      // triangle direction station
       if (g.charger[2] != null && !Number.isNaN(Number(g.charger[2]))) {
         const a = ((90 - Number(g.charger[2])) % 360 + 360) % 360;
         const rad = (a * Math.PI) / 180;
         ctx.beginPath();
         ctx.moveTo(cx, cy);
-        ctx.lineTo(
-          cx + Math.cos(rad) * 6,
-          cy - Math.sin(rad) * 6
-        );
+        ctx.lineTo(cx + Math.cos(rad) * 6, cy - Math.sin(rad) * 6);
         ctx.strokeStyle = COLORS.charger;
         ctx.stroke();
       }
     }
     // robot
-    if (g.robot && g.robot.length >= 2) {
-      const [rx, ry] = g.vacToPixel(Number(g.robot[0]), Number(g.robot[1]));
+    if (robotPx) {
+      const [rx, ry] = robotPx;
+      if (overlapped) {
+        // anneau vert de la base autour du robot docké
+        ctx.beginPath();
+        ctx.arc(rx, ry, Math.max(3.4, 4.8), 0, Math.PI * 2);
+        ctx.strokeStyle = COLORS.charger;
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+      }
       const a = g.robot[2] != null ? ((90 - Number(g.robot[2])) % 360 + 360) % 360 : null;
       ctx.beginPath();
       ctx.arc(rx, ry, Math.max(2, 3.4), 0, Math.PI * 2);
@@ -1175,13 +1190,17 @@ class DreameOpenMapCard extends HTMLElement {
     ctx.font = `${Math.max(10, Math.round(scale * 3.2))}px sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    if (g.robot && g.robot.length >= 2) {
-      const [rx, ry] = g.vacToPixel(Number(g.robot[0]), Number(g.robot[1]));
-      ctx.fillText("🤖", rx * scale, (g.height - ry) * scale);
+    const robotPx = g.robot && g.robot.length >= 2
+      ? g.vacToPixel(Number(g.robot[0]), Number(g.robot[1])) : null;
+    const chargerPx = g.charger && g.charger.length >= 2
+      ? g.vacToPixel(Number(g.charger[0]), Number(g.charger[1])) : null;
+    const overlapped = robotPx && chargerPx &&
+      Math.hypot(robotPx[0] - chargerPx[0], robotPx[1] - chargerPx[1]) < 5;
+    if (robotPx) {
+      ctx.fillText("🤖", robotPx[0] * scale, (g.height - robotPx[1]) * scale);
     }
-    if (g.charger && g.charger.length >= 2) {
-      const [cx, cy] = g.vacToPixel(Number(g.charger[0]), Number(g.charger[1]));
-      ctx.fillText("⚡", cx * scale, (g.height - cy) * scale - scale * 2);
+    if (chargerPx && !overlapped) {
+      ctx.fillText("⚡", chargerPx[0] * scale, (g.height - chargerPx[1]) * scale - scale * 2);
     }
   }
 }
