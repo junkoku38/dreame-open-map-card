@@ -18,7 +18,7 @@
  * Licence : MIT
  */
 
-const CARD_VERSION = "0.1.6";
+const CARD_VERSION = "0.1.7";
 
 if (typeof console !== "undefined" && typeof console.info === "function") {
   console.info(
@@ -949,21 +949,24 @@ class DreameOpenMapCard extends HTMLElement {
     let scale = clampInt(1100 / Math.max(g.width, g.height), 1, 8);
     if (scale < 1) scale = 1;
     this._scale = scale;
-    const W = g.width * scale;
-    const H = g.height * scale;
+    // HiDPI : backing store multiplié par le devicePixelRatio, repère logique inchangé
+    const dpr = Math.max(1, Math.min(2, (typeof window !== "undefined" && window.devicePixelRatio) || 1));
+    this._dpr = dpr;
+    const W = Math.round(g.width * scale * dpr);
+    const H = Math.round(g.height * scale * dpr);
     if (canvas.width !== W) canvas.width = W;
     if (canvas.height !== H) canvas.height = H;
 
     const ctx = canvas.getContext("2d");
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, W, H);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     const bg = parseCssColor(this._colors.background, [255, 255, 255]);
     ctx.fillStyle = `rgb(${bg[0]},${bg[1]},${bg[2]})`;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     // repère raster : x vers la droite, y vers le HAUT (origine en bas à gauche)
-    ctx.setTransform(scale, 0, 0, -scale, 0, H);
+    ctx.setTransform(scale * dpr, 0, 0, -scale * dpr, 0, H);
 
     const floor = colorParts(this._colors.floor, [236, 233, 225]);
     const wall = colorParts(this._colors.wall, [154, 160, 166]);
@@ -1013,8 +1016,8 @@ class DreameOpenMapCard extends HTMLElement {
     this._drawPath(ctx, g);
     this._drawMarkers(ctx, g);
 
-    // repasse en pixels écran pour les libellés (pas de texte dans le repère inversé)
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    // repasse en pixels écran (logiques) pour les libellés (pas de texte dans le repère inversé)
+    ctx.setTransform(this._dpr, 0, 0, this._dpr, 0, 0);
     if (this._config.show_room_labels !== false && g.width >= 40) {
       this._drawRoomLabels(ctx, g);
       this._drawDeviceLabels(ctx, g);
