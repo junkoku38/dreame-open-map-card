@@ -18,7 +18,7 @@
  * Licence : MIT
  */
 
-const CARD_VERSION = "0.1.3";
+const CARD_VERSION = "0.1.4";
 
 if (typeof console !== "undefined" && typeof console.info === "function") {
   console.info(
@@ -45,7 +45,7 @@ const LAYER = {
   WALL: 255,       // murs (fines bordures autour des pièces)
 };
 
-const SEGMENT_COLORS = [
+const DEFAULT_SEGMENT_COLORS = [
   "rgb(99, 181, 245)",
   "rgb(245, 183, 74)",
   "rgb(120, 226, 205)",
@@ -184,7 +184,7 @@ async function jsonFromBytes(bytes) {
  * Géométrie de la carte
  * ------------------------------------------------------------------ */
 class MapGeometry {
-  constructor(data) {
+  constructor(data, segmentColors) {
     this.raw = data;
     this.empty = !data || !!data.empty_map || !data.size || !data.data;
     const size = (data && data.size) || [];
@@ -216,16 +216,24 @@ class MapGeometry {
           x: s[1], y: s[2],
           type: s[3],
           name: s[4] ? b64ToUtf8(s[4]) : null,
-          colorIndex: Number(s[6]) || 0,
+          // s[10] = visibilité (false : pièce cachée — sémantique de l'intégration)
+          hidden: s[10] === false,
+          colorIndex: Number(s[6]),
           unmapped: !!s[11],
           order: s[12],
           bbox: Array.isArray(s[20]) && s[20].length === 4 ? s[20].map(Number) : null,
         };
       }
     }
+    this.hiddenSegments = new Set(
+      Object.values(this.segments).filter((s) => s.hidden).map((s) => s.id)
+    );
     this.visibleSegments = Object.values(this.segments)
-      .filter((s) => !s.unmapped)
+      .filter((s) => !s.unmapped && !s.hidden)
       .sort((a, b) => (a.order ?? a.id) - (b.order ?? b.id));
+    this._segmentColors = Array.isArray(segmentColors) && segmentColors.length
+      ? segmentColors
+      : DEFAULT_SEGMENT_COLORS;
 
     this.activeSegments = (data && data.active_segments) || [];
     this.path = (data && data.path) || [];
@@ -249,12 +257,19 @@ class MapGeometry {
     return [px * this.grid + this.left, py * this.grid + this.top];
   }
 
-  /** couleur de remplissage d'un segment. */
+  /** couleur de remplissage d'un segment.
+   * Sémantique de l'intégration : color_index = index de table (0 valide) ;
+   * les cartes version 3 appliquent la permutation [0,2,3,1] (map.py:6603). */
   segmentColor(segId) {
     const seg = this.segments[segId];
-    let idx = seg && seg.colorIndex ? seg.colorIndex : segId;
-    idx = ((idx - 1) % SEGMENT_COLORS.length + SEGMENT_COLORS.length) % SEGMENT_COLORS.length;
-    return SEGMENT_COLORS[idx];
+    let idx = seg && seg.colorIndex != null && !Number.isNaN(seg.colorIndex)
+      ? seg.colorIndex : segId;
+    if (Number(this.raw && this.raw.version) === 3) {
+      const p = [0, 2, 3, 1];
+      idx = Number.isInteger(idx) && idx >= 0 && idx < p.length ? p[idx] : idx;
+    }
+    idx = ((idx % this._segmentColors.length) + this._segmentColors.length) % this._segmentColors.length;
+    return this._segmentColors[idx];
   }
 }
 
@@ -313,15 +328,16 @@ class DreameOpenMapCard extends HTMLElement {
       segment_colors: null,
       ...config,
     };
-    if (Array.isArray(this._config.segment_colors) && this._config.segment_colors.length) {
-      SEGMENT_COLORS.length = 0;
-      SEGMENT_COLORS.push(...this._config.segment_colors);
-    }
-    if (this._config.colors) {
-      for (const k of Object.keys(COLORS)) {
-        if (this._config.colors[k] !== undefined) COLORS[k] = this._config.colors[k];
-      }
-    }
+    // normalisation
+    this._config.update_interval = Math.max(
+      1, Math.min(120, Number(this._config.update_interval) || 5)
+    );
+    // couleurs par instance (jamais globales : plusieurs cartes/cobots possibles)
+    this._colors = { ...COLORS, ...(this._config.colors || {}) };
+    this._segmentColors =
+      Array.isArray(this._config.segment_colors) && this._config.segment_colors.length
+        ? [...this._config.segment_colors]
+        : [...DEFAULT_SEGMENT_COLORS];
     this._buildUI();
   }
 
@@ -336,7 +352,7 @@ class DreameOpenMapCard extends HTMLElement {
     this._updateStatus();
     if (!this._config) return;
     const need = first || this._refetchDue();
-    if (need && !this._fetching && hass.connected) {
+    if (need && !this._fetching && hass.connected && !document.hidden) {
       this._fetchData();
     }
     this._scheduleFetchLoop();
@@ -362,7 +378,8 @@ class DreameOpenMapCard extends HTMLElement {
   _integratedUpdateMs() {
     // rafraîchit plus souvent quand le robot travaille
     const st = this._hass && this._hass.states ? this._hass.states[this._config.entity] : null;
-    const busy = st && ["cleaning", "returning", "returning_to_base", "segment_cleaning"].includes(st.state);
+    const idle = ["docked", "dormant", "idle", "paused", "error", "unavailable", "unknown"];
+    const busy = st && !idle.includes(st.state);
     if (busy) return Math.min(2000, this._config.update_interval * 1000);
     return this._config.update_interval * 1000;
   }
@@ -392,7 +409,7 @@ class DreameOpenMapCard extends HTMLElement {
     try {
       const json = await this._requestData();
       this._mapData = json && json.empty_map ? null : json;
-      this._geom = this._mapData ? new MapGeometry(this._mapData) : null;
+      this._geom = this._mapData ? new MapGeometry(this._mapData, this._segmentColors) : null;
       this._error = null;
     } catch (e) {
       // dernier message conservé (plus informatif que le premier)
@@ -404,7 +421,10 @@ class DreameOpenMapCard extends HTMLElement {
       if (this._geom && this._geom.frameId !== this._lastFrameId) {
         this._lastFrameId = this._geom.frameId;
         this._selectedRooms = new Set(
-          [...this._selectedRooms].filter((id) => this._geom.segments[id])
+          [...this._selectedRooms].filter((id) => {
+            const s = this._geom.segments[id];
+            return s && !s.unmapped && !s.hidden;
+          })
         );
         this._builtRoomEpoch = -1; // force la reconstruction des pastilles
       }
@@ -502,6 +522,9 @@ class DreameOpenMapCard extends HTMLElement {
         .vactions { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 12px; }
         .hint { font-size: .74rem; color: var(--secondary-text-color, #777); padding: 0 14px 10px; }
         .error { color: var(--error-color, #b3261e); font-size: .8rem; padding: 0 14px 10px; }
+        .notice { color: var(--secondary-text-color, #777); font-size: .8rem; padding: 0 14px 10px; }
+        .notice:empty { display: none; }
+        .error:empty { display: none; }
         .meta { font-size: .7rem; color: var(--secondary-text-color, #999); padding: 0 14px 10px; }
       </style>
       <div class="header">
@@ -510,11 +533,12 @@ class DreameOpenMapCard extends HTMLElement {
         <span class="battery"></span>
       </div>
       <div class="toolbar"></div>
-      <div class="mapwrap"><canvas></canvas></div>
+      <div class="mapwrap"><canvas role="img" aria-label="Carte du robot"></canvas></div>
       <div class="chips"></div>
       <div class="actions"></div>
       <div class="vactions"></div>
       <div class="error"></div>
+      <div class="notice"></div>
       <div class="hint"></div>
       <div class="meta"></div>
     `;
@@ -694,6 +718,7 @@ class DreameOpenMapCard extends HTMLElement {
     const stEl = this.shadowRoot.querySelector(".header .state");
     const batEl = this.shadowRoot.querySelector(".header .battery");
     const errEl = this.shadowRoot.querySelector(".error");
+    const noticeEl = this.shadowRoot.querySelector(".notice");
     const metaEl = this.shadowRoot.querySelector(".meta");
     if (nameEl) {
       nameEl.textContent =
@@ -709,24 +734,26 @@ class DreameOpenMapCard extends HTMLElement {
           : "";
     }
     if (errEl) {
+      // rouge réservé aux VRAIES erreurs (échec réseau/rendu, entité absente)
+      errEl.textContent = this._error
+        ? `Carte : ${this._error}`
+        : this._hass.states && !this._hass.states[this._config.camera]
+        ? `Entité camera « ${this._config.camera} » introuvable. ` +
+          "Active l'entité « Données cartographiques actuelles » de l'intégration (désactivée par défaut)."
+        : "";
+    }
+    if (noticeEl) {
+      // attente / carte vide = information neutre, pas une erreur
       let text = "";
-      if (this._error) {
-        text = `Carte : ${this._error}`;
-      } else if (this._hass.states && !this._hass.states[this._config.camera]) {
-        text =
-          `Entité camera « ${this._config.camera} » introuvable. ` +
-          "Active l'entité « Données cartographiques actuelles » de l'intégration (désactivée par défaut).";
-      } else {
-        const camState = this._hass.states
-          ? this._hass.states[this._config.camera]
-          : null;
+      if (!this._error) {
+        const camState = this._hass.states ? this._hass.states[this._config.camera] : null;
         if (camState && ["unavailable", "unknown"].includes(camState.state)) {
           text = `En attente de la première donnée de carte (caméra : « ${camState.state} »)…`;
         } else if (!this._geom) {
           text = "Carte vide ou indisponible pour le moment.";
         }
       }
-      errEl.textContent = text;
+      noticeEl.textContent = text;
     }
     if (metaEl) {
       const secs = Math.round((Date.now() - this._lastFetchAt) / 1000);
@@ -920,20 +947,22 @@ class DreameOpenMapCard extends HTMLElement {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, W, H);
 
-    const bg = parseCssColor(COLORS.background, [255, 255, 255]);
+    const bg = parseCssColor(this._colors.background, [255, 255, 255]);
     ctx.fillStyle = `rgb(${bg[0]},${bg[1]},${bg[2]})`;
     ctx.fillRect(0, 0, W, H);
 
     // repère raster : x vers la droite, y vers le HAUT (origine en bas à gauche)
     ctx.setTransform(scale, 0, 0, -scale, 0, H);
 
-    const floor = colorParts(COLORS.floor, [236, 233, 225]);
-    const wall = colorParts(COLORS.wall, [154, 160, 166]);
-    const carpet = parseCssColor(COLORS.carpet, [178, 132, 84, 0.3]);
-    const obstacle = colorParts(COLORS.obstacle, [92, 99, 110]);
+    const floor = colorParts(this._colors.floor, [236, 233, 225]);
+    const wall = colorParts(this._colors.wall, [154, 160, 166]);
+    const carpet = parseCssColor(this._colors.carpet, [178, 132, 84, 0.3]);
+    const obstacle = colorParts(this._colors.obstacle, [92, 99, 110]);
 
     for (const key of Object.keys(g.layers)) {
       const layer = Number(key);
+      // segment caché (visibility=false) : jamais dessiné, comme le renderer officiel
+      if (g.hiddenSegments && g.hiddenSegments.has(layer)) continue;
       const runs = g.layers[key];
       if (layer === LAYER.FLOOR) {
         this._paintRuns(ctx, runs, floor[0], floor[1], floor[2], 1);
@@ -961,8 +990,10 @@ class DreameOpenMapCard extends HTMLElement {
         if (runs) this._paintRuns(ctx, runs, rgb[0], rgb[1], rgb[2], a);
       }
     };
-    hi(g.activeSegments || [], [30, 136, 229], 0.45);
-    hi([...this._selectedRooms], [255, 152, 0], 0.45);
+    const actC = colorParts(this._colors.activeSegment, [30, 136, 229]);
+    const selC = colorParts(this._colors.selectedSegment, [255, 152, 0]);
+    hi(g.activeSegments || [], actC, 0.45);
+    hi([...this._selectedRooms], selC, 0.45);
 
     // vecteurs
     this._drawQuads(ctx, g);
@@ -993,7 +1024,7 @@ class DreameOpenMapCard extends HTMLElement {
   _drawQuads(ctx, g) {
     const conv = (v) => g.vacToPixel(v[0], v[1]);
     for (const area of g.activeAreas || []) {
-      this._strokeQuad(ctx, area.slice(0, 8).map(Number), COLORS.activeArea, COLORS.activeAreaStroke, conv);
+      this._strokeQuad(ctx, area.slice(0, 8).map(Number), this._colors.activeArea, this._colors.activeAreaStroke, conv);
     }
     for (const c of g.carpets || []) {
       if (Array.isArray(c) && c.length >= 8) {
@@ -1001,11 +1032,11 @@ class DreameOpenMapCard extends HTMLElement {
       }
     }
     for (const z of g.noGo || []) {
-      this._strokeQuad(ctx, z.slice(0, 8).map(Number), COLORS.noGo, COLORS.virtualWall, conv);
+      this._strokeQuad(ctx, z.slice(0, 8).map(Number), this._colors.noGo, this._colors.virtualWall, conv);
     }
     for (const z of g.noMop || []) {
       if (Array.isArray(z) && z.length >= 10 && Number(z[9]) === 1) continue; // cachée
-      this._strokeQuad(ctx, z.slice(0, 8).map(Number), COLORS.noMop, "#aa2fff", conv);
+      this._strokeQuad(ctx, z.slice(0, 8).map(Number), this._colors.noMop, "#aa2fff", conv);
     }
   }
 
@@ -1025,7 +1056,7 @@ class DreameOpenMapCard extends HTMLElement {
   }
 
   _drawVirtualWalls(ctx, g) {
-    ctx.strokeStyle = COLORS.virtualWall;
+    ctx.strokeStyle = this._colors.virtualWall;
     ctx.lineWidth = Math.max(0.8, 0.5);
     for (const w of g.virtualWalls || []) {
       if (!Array.isArray(w) || w.length < 4) continue;
@@ -1044,12 +1075,12 @@ class DreameOpenMapCard extends HTMLElement {
       const y = Math.min(r.y0, r.y1);
       const w = Math.abs(r.x1 - r.x0) + 1;
       const h = Math.abs(r.y1 - r.y0) + 1;
-      ctx.fillStyle = COLORS.pendingZone;
+      ctx.fillStyle = this._colors.pendingZone;
       ctx.fillRect(x, y, w, h);
-      ctx.strokeStyle = COLORS.pendingZoneStroke;
+      ctx.strokeStyle = this._colors.pendingZoneStroke;
       ctx.strokeRect(x, y, w, h);
     }
-    ctx.fillStyle = COLORS.point;
+    ctx.fillStyle = this._colors.point;
     for (const p of this._pendingPoints) {
       ctx.beginPath();
       ctx.arc(p[0], p[1], Math.max(1.2, 3), 0, Math.PI * 2);
@@ -1068,14 +1099,14 @@ class DreameOpenMapCard extends HTMLElement {
     if (!Array.isArray(g.path) || !g.path.length) return;
     const styles = [
       null,
-      COLORS.path,          // S   : trajectoire principale
-      COLORS.pathMove,      // W
-      COLORS.pathMove,      // M
+      this._colors.path,          // S   : trajectoire principale
+      this._colors.pathMove,      // W
+      this._colors.pathMove,      // M
     ];
     ctx.lineWidth = 0.7;
     for (const entry of g.path) {
       if (!Array.isArray(entry) || entry.length < 3) continue;
-      const color = styles[entry[0]] || COLORS.pathMove;
+      const color = styles[entry[0]] || this._colors.pathMove;
       ctx.strokeStyle = color;
       ctx.beginPath();
       for (let i = 1; i + 1 < entry.length; i += 2) {
@@ -1101,7 +1132,7 @@ class DreameOpenMapCard extends HTMLElement {
       const [cx, cy] = chargerPx;
       ctx.beginPath();
       ctx.arc(cx, cy, Math.max(1, 3), 0, Math.PI * 2);
-      ctx.fillStyle = COLORS.charger;
+      ctx.fillStyle = this._colors.charger;
       ctx.fill();
       ctx.strokeStyle = "#ffffff";
       ctx.lineWidth = 0.5;
@@ -1112,7 +1143,7 @@ class DreameOpenMapCard extends HTMLElement {
         ctx.beginPath();
         ctx.moveTo(cx, cy);
         ctx.lineTo(cx + Math.cos(rad) * 6, cy - Math.sin(rad) * 6);
-        ctx.strokeStyle = COLORS.charger;
+        ctx.strokeStyle = this._colors.charger;
         ctx.stroke();
       }
     }
@@ -1123,14 +1154,14 @@ class DreameOpenMapCard extends HTMLElement {
         // anneau vert de la base autour du robot docké
         ctx.beginPath();
         ctx.arc(rx, ry, Math.max(3.4, 4.8), 0, Math.PI * 2);
-        ctx.strokeStyle = COLORS.charger;
+        ctx.strokeStyle = this._colors.charger;
         ctx.lineWidth = 1.2;
         ctx.stroke();
       }
       const a = g.robot[2] != null ? ((90 - Number(g.robot[2])) % 360 + 360) % 360 : null;
       ctx.beginPath();
       ctx.arc(rx, ry, Math.max(2, 3.4), 0, Math.PI * 2);
-      ctx.fillStyle = COLORS.robot;
+      ctx.fillStyle = this._colors.robot;
       ctx.fill();
       ctx.strokeStyle = "#ffffff";
       ctx.lineWidth = 0.7;
@@ -1143,7 +1174,7 @@ class DreameOpenMapCard extends HTMLElement {
           rx + Math.cos(rad) * Math.max(4.5, 7),
           ry - Math.sin(rad) * Math.max(4.5, 7)
         );
-        ctx.strokeStyle = COLORS.robot;
+        ctx.strokeStyle = this._colors.robot;
         ctx.lineWidth = 1.1;
         ctx.stroke();
       }
@@ -1154,7 +1185,7 @@ class DreameOpenMapCard extends HTMLElement {
   _drawRoomLabels(ctx, g) {
     const scale = this._scale;
     ctx.font = `${Math.max(9, Math.round(scale * 2.6))}px 'Segoe UI', sans-serif`;
-    ctx.fillStyle = COLORS.label;
+    ctx.fillStyle = this._colors.label;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.shadowColor = "rgba(255,255,255,.85)";
