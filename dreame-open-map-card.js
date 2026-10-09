@@ -18,7 +18,7 @@
  * Licence : MIT
  */
 
-const CARD_VERSION = "0.1.1";
+const CARD_VERSION = "0.1.2";
 
 if (typeof console !== "undefined" && typeof console.info === "function") {
   console.info(
@@ -393,9 +393,8 @@ class DreameOpenMapCard extends HTMLElement {
       this._geom = this._mapData ? new MapGeometry(this._mapData) : null;
       this._error = null;
     } catch (e) {
-      if (!this._error) {
-        this._error = e && e.message ? e.message : String(e);
-      }
+      // dernier message conservé (plus informatif que le premier)
+      this._error = e && e.message ? e.message : String(e);
       // ralentit en cas d'échec répété
       this._lastFetchAt = Date.now() + this._integratedUpdateMs();
     } finally {
@@ -416,16 +415,30 @@ class DreameOpenMapCard extends HTMLElement {
     // le serveur pose "Cache-Control: immutable" : cache-buster obligatoire
     const url = new URL(`/api/camera_map_data_proxy/${entity}`, location);
     url.searchParams.set("ts", String(Date.now()));
-    if (this._hass.fetchWithAuth) {
+    const stages = [];
+    try {
       const resp = await this._hass.fetchWithAuth(url.toString());
-      if (!resp.ok) throw new Error(`HTTP ${resp.status} sur camera_map_data_proxy`);
-      return jsonFromBytes(new Uint8Array(await resp.arrayBuffer()));
+      if (!resp.ok) {
+        throw new Error(
+          `HTTP ${resp.status} sur /api/camera_map_data_proxy` +
+          (resp.status === 401 ? " (authentification refusée, recharger la page F5)" : "")
+        );
+      }
+      return await jsonFromBytes(new Uint8Array(await resp.arrayBuffer()));
+    } catch (e1) {
+      stages.push("fetch: " + (e1 && e1.message ? e1.message : e1));
     }
-    // secours : callApi gère l'authentification et le décodage JSON
-    const data = await this._hass.callApi("GET", `camera_map_data_proxy/${entity}?ts=${Date.now()}`);
-    if (data && typeof data === "object") return data;
-    if (typeof data === "string") return jsonFromBytes(bytesFromString(data));
-    throw new Error("réponse inattendue du serveur de carte");
+    try {
+      const data = await this._hass.callApi("GET", `camera_map_data_proxy/${entity}?ts=${Date.now()}`);
+      if (data && typeof data === "object") return data;
+      if (typeof data === "string") return jsonFromBytes(bytesFromString(data));
+      stages.push("callApi: réponse inattendue (" + typeof data + ")");
+    } catch (e2) {
+      const detail =
+        e2 && (e2.error || e2.message) ? (e2.error || e2.message) : String(e2);
+      stages.push("callApi: " + detail);
+    }
+    throw new Error("échec de récupération des données de carte — " + stages.join(" ;; "));
   }
 
   /* ------------------------------ UI --------------------------------- */
@@ -673,7 +686,7 @@ class DreameOpenMapCard extends HTMLElement {
   }
 
   _updateStatus() {
-    if (!this._hass || !this._config || !this.shadowRoot.querySelector) return;
+    if (!this._hass || !this._config || !this.shadowRoot || !this.shadowRoot.querySelector) return;
     const st = this._hass.states ? this._hass.states[this._config.entity] : null;
     const nameEl = this.shadowRoot.querySelector(".header .name");
     const stEl = this.shadowRoot.querySelector(".header .state");
@@ -701,8 +714,15 @@ class DreameOpenMapCard extends HTMLElement {
         text =
           `Entité camera « ${this._config.camera} » introuvable. ` +
           "Active l'entité « Données cartographiques actuelles » de l'intégration (désactivée par défaut).";
-      } else if (!this._geom) {
-        text = "Carte vide ou indisponible pour le moment.";
+      } else {
+        const camState = this._hass.states
+          ? this._hass.states[this._config.camera]
+          : null;
+        if (camState && ["unavailable", "unknown"].includes(camState.state)) {
+          text = `En attente de la première donnée de carte (caméra : « ${camState.state} »)…`;
+        } else if (!this._geom) {
+          text = "Carte vide ou indisponible pour le moment.";
+        }
       }
       errEl.textContent = text;
     }
