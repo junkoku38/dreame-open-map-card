@@ -18,7 +18,7 @@
  * Licence : MIT
  */
 
-const CARD_VERSION = "0.1.5";
+const CARD_VERSION = "0.1.6";
 
 if (typeof console !== "undefined" && typeof console.info === "function") {
   console.info(
@@ -195,6 +195,7 @@ class MapGeometry {
     this.grid = Number(size[6]) || 6;   // mm par pixel
     this.rotation = Number(size[7]) || 0;
     this.frameId = (data && data.frame_id) || 0;
+    this.version = Number(data && data.version) || 0;
 
     // couches de pixels : { "12": [x,y,n, x,y,n, ...], ... }
     this.layers = {};
@@ -218,7 +219,8 @@ class MapGeometry {
           name: s[4] ? b64ToUtf8(s[4]) : null,
           // s[10] = visibilité (false : pièce cachée — sémantique de l'intégration)
           hidden: s[10] === false,
-          colorIndex: Number(s[6]),
+          // Number(null) = 0 : il faut distinguer « absent » (null) d'un vrai 0
+          colorIndex: s[6] == null ? null : Number(s[6]),
           unmapped: !!s[11],
           order: s[12],
           bbox: Array.isArray(s[20]) && s[20].length === 4 ? s[20].map(Number) : null,
@@ -262,7 +264,7 @@ class MapGeometry {
    * les cartes version 3 appliquent la permutation [0,2,3,1] (map.py:6603). */
   segmentColor(segId) {
     const seg = this.segments[segId];
-    let idx = seg && seg.colorIndex != null && !Number.isNaN(seg.colorIndex)
+    let idx = seg && seg.colorIndex != null && Number.isFinite(seg.colorIndex)
       ? seg.colorIndex : segId;
     if (Number(this.raw && this.raw.version) === 3) {
       const p = [0, 2, 3, 1];
