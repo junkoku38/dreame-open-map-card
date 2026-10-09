@@ -1,5 +1,10 @@
 # Historique des versions
 
+## v0.2.1
+- Batterie désormais fiable sur dreame-vacuum : attribut standard `battery_level` avec repli sur `battery` (seul attribut exposé par l'intégration) ; icônes mdi graduées (charge, niveaux, rouge sous 20 %).
+- `getStubConfig` : pré-remplissage automatique de la configuration dans l'éditeur (aspirateur + caméra assortie).
+- `getGridOptions` : pleine largeur annoncée aux nouvelles grilles Lovelace.
+
 ## v0.2.0
 - `update_interval` : normalisation stricte (les booléens, négatifs et non numériques retombent sur le défaut 5 ; chaînes numériques acceptées ; borné 1–120).
 - Canvas : `aria-label` renseigné avec le nom réel de l'aspirateur.

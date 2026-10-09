@@ -18,7 +18,7 @@
  * Licence : MIT
  */
 
-const CARD_VERSION = "0.2.0";
+const CARD_VERSION = "0.2.1";
 
 if (typeof console !== "undefined" && typeof console.info === "function") {
   console.info(
@@ -283,8 +283,24 @@ class MapGeometry {
  * La carte
  * ------------------------------------------------------------------ */
 class DreameOpenMapCard extends HTMLElement {
-  static getStubConfig() {
-    return { entity: "", camera: "" };
+  static getStubConfig(hass, entities) {
+    if (!hass || !hass.states) return { entity: "vacuum.robot", camera: "camera.robot_map_data" };
+    const pool = Array.isArray(entities) && entities.length ? entities : Object.keys(hass.states);
+    const vacuum = pool.find((e) => e.startsWith("vacuum.") && hass.states[e]);
+    if (!vacuum) return { entity: "vacuum.robot", camera: "camera.robot_map_data" };
+    // caméra : celle qui partage le nom de l'aspirateur, sinon la première map_data
+    const slug = vacuum.slice("vacuum.".length);
+    const cams = pool.filter((e) => e.startsWith("camera.") && /map/i.test(e) && hass.states[e]);
+    const camera =
+      cams.find((c) => c.includes(slug)) ||
+      cams.find((c) => /map_data/i.test(c)) ||
+      cams[0] ||
+      `camera.${slug}_map_data`;
+    return { entity: vacuum, camera };
+  }
+
+  getGridOptions() {
+    return { columns: 12, min_columns: 6 };
   }
 
   constructor() {
@@ -497,6 +513,7 @@ class DreameOpenMapCard extends HTMLElement {
         .header { display: flex; align-items: center; gap: 8px; padding: 12px 14px 4px; }
         .header .name { flex: 1; font-size: 1.05rem; font-weight: 600; color: var(--primary-text-color, #111); }
         .header .battery, .header .state { font-size: .8rem; color: var(--secondary-text-color, #666); }
+        .header .battery ha-icon { --mdc-icon-size: 15px; vertical-align: -2px; margin-right: 2px; }
         .toolbar { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 12px; }
         .toolbar button {
           background: var(--secondary-background-color, #eee);
@@ -760,10 +777,29 @@ class DreameOpenMapCard extends HTMLElement {
       canvasEl.setAttribute("aria-label", `Carte du robot ${who}`);
     }
     if (batEl) {
-      batEl.textContent =
-        st && st.attributes && st.attributes.battery_level != null
-          ? `🔋 ${st.attributes.battery_level}%`
-          : "";
+      // batterie : l'attribut standard HA est battery_level, mais l'intégration
+      // dreame-vacuum n'expose que battery (vérifié sur l'entité réelle)
+      const a = st && st.attributes ? st.attributes : null;
+      const raw = a && a.battery_level != null ? a.battery_level : a && a.battery != null ? a.battery : null;
+      const bat = raw == null ? NaN : Math.round(Number(raw));
+      batEl.textContent = "";
+      if (Number.isFinite(bat)) {
+        const pct = Math.max(0, Math.min(100, bat));
+        const charging = st && st.state === "docked" && pct < 100;
+        const step = Math.max(10, Math.round(pct / 10) * 10);
+        const icon =
+          charging ? `mdi:battery-charging-${Math.min(100, step)}`
+          : pct >= 95 ? "mdi:battery"
+          : `mdi:battery-${Math.max(10, Math.min(90, step))}`;
+        const ic = document.createElement("ha-icon");
+        ic.setAttribute("icon", icon);
+        ic.style.color = pct <= 20 ? "#e53935" : pct <= 50 ? "#ef6c00" : "";
+        const pctTxt = document.createElement("span");
+        pctTxt.textContent = ` ${pct} %`;
+        batEl.appendChild(ic);
+        batEl.appendChild(pctTxt);
+        batEl.title = charging ? `En charge — ${pct} %` : `Batterie ${pct} %`;
+      }
     }
     if (errEl) {
       // rouge réservé aux VRAIES erreurs (échec réseau/rendu, entité absente)
