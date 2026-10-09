@@ -56,6 +56,7 @@ entity: vacuum.mon_dreame
 camera: camera.mon_dreame_map_data
 title: "Robot du salon"            # optionnel
 update_interval: 5                 # rafraîchissement base, en s (1–120, défaut 5)
+debug: false                       # inclure les détails techniques dans le message d'erreur
 controls: true                     # boutons Nettoyer/Pause/Stop/Base/Localiser
 room_cleaning: true
 zone_cleaning: true

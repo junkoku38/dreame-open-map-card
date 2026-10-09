@@ -18,7 +18,7 @@
  * Licence : MIT
  */
 
-const CARD_VERSION = "0.1.8";
+const CARD_VERSION = "0.1.9";
 
 if (typeof console !== "undefined" && typeof console.info === "function") {
   console.info(
@@ -196,7 +196,7 @@ class MapGeometry {
     this.top = Number(size[1]) || 0;
     this.width = Math.max(1, Math.round(Number(size[4]) || 1));
     this.height = Math.max(1, Math.round(Number(size[5]) || 1));
-    this.grid = Number(size[6]) || 6;   // mm par pixel
+    this.grid = Number(size[6]) || 50;  // mm par pixel (protocole Dreame : toujours 50)
     this.rotation = Number(size[7]) || 0;
     this.frameId = (data && data.frame_id) || 0;
     this.version = Number(data && data.version) || 0;
@@ -332,6 +332,7 @@ class DreameOpenMapCard extends HTMLElement {
       show_room_labels: true,
       colors: null,
       segment_colors: null,
+      debug: false,
       ...config,
     };
     // normalisation
@@ -466,7 +467,14 @@ class DreameOpenMapCard extends HTMLElement {
         e2 && (e2.error || e2.message) ? (e2.error || e2.message) : String(e2);
       stages.push("callApi: " + detail);
     }
-    throw new Error("échec de récupération des données de carte — " + stages.join(" ;; "));
+    const detail = stages.join(" ;; ");
+    if (typeof console !== "undefined" && console.warn) {
+      console.warn("dreame-open-map-card : échec de récupération des données de carte —", detail);
+    }
+    throw new Error(
+      "Échec de récupération des données de la carte. La carte réessaie automatiquement." +
+      (this._config && this._config.debug ? ` Détails : ${detail}` : "")
+    );
   }
 
   /* ------------------------------ UI --------------------------------- */
