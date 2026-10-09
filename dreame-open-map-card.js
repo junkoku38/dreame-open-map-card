@@ -18,7 +18,7 @@
  * Licence : MIT
  */
 
-const CARD_VERSION = "0.1.9";
+const CARD_VERSION = "0.2.0";
 
 if (typeof console !== "undefined" && typeof console.info === "function") {
   console.info(
@@ -335,10 +335,14 @@ class DreameOpenMapCard extends HTMLElement {
       debug: false,
       ...config,
     };
-    // normalisation
-    this._config.update_interval = Math.max(
-      1, Math.min(120, Number(this._config.update_interval) || 5)
-    );
+    // normalisation : (nombre ou chaîne numérique) positif → borné 1..120, sinon défaut 5
+    {
+      const raw = this._config.update_interval;
+      const n = typeof raw === "number" ? raw
+        : typeof raw === "string" && raw.trim() !== "" ? Number(raw) : NaN;
+      this._config.update_interval =
+        Number.isFinite(n) && n > 0 ? Math.max(1, Math.min(120, Math.round(n))) : 5;
+    }
     // couleurs par instance (jamais globales : plusieurs cartes/cobots possibles)
     this._colors = { ...COLORS, ...(this._config.colors || {}) };
     this._segmentColors =
@@ -750,6 +754,11 @@ class DreameOpenMapCard extends HTMLElement {
         this._config.entity;
     }
     if (stEl) stEl.textContent = st ? FRENCH_VACUUM_STATE[st.state] || st.state : "";
+    const canvasEl = this.shadowRoot.querySelector("canvas");
+    if (canvasEl) {
+      const who = this._config.title || (st && st.attributes && st.attributes.friendly_name) || this._config.entity;
+      canvasEl.setAttribute("aria-label", `Carte du robot ${who}`);
+    }
     if (batEl) {
       batEl.textContent =
         st && st.attributes && st.attributes.battery_level != null
