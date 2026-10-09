@@ -18,7 +18,7 @@
  * Licence : MIT
  */
 
-const CARD_VERSION = "0.3.0";
+const CARD_VERSION = "0.3.1";
 
 if (typeof console !== "undefined" && typeof console.info === "function") {
   console.info(
@@ -1373,6 +1373,12 @@ const FRENCH_VACUUM_STATE = {
 /* ------------------------------------------------------------------ *
  * Éditeur visuel (GUI editor)
  * ------------------------------------------------------------------ */
+const EDITOR_MANAGED_KEYS = new Set([
+  "entity", "camera", "title", "update_interval",
+  "controls", "room_cleaning", "zone_cleaning", "goto", "follow_path",
+  "show_room_labels", "debug",
+]);
+
 class DreameOpenMapCardEditor extends HTMLElement {
   constructor() {
     super();
@@ -1478,7 +1484,14 @@ class DreameOpenMapCardEditor extends HTMLElement {
 
   _loadValues() {
     const c = this._config || {};
-    const set = (id, v) => { const el = this._inputs[id]; if (el) el.value = v; };
+    // ne pas écraser le champ en cours d'édition (HA reçoit config-changed et
+    // rappelle setConfig après chaque frappe)
+    const ae = typeof document !== "undefined" && document.activeElement ? document.activeElement : null;
+    const skipIfFocused = (el) => ae && el === ae;
+    const set = (id, v) => {
+      const el = this._inputs[id];
+      if (el && !skipIfFocused(el)) el.value = v;
+    };
     set("f-entity", c.entity != null ? String(c.entity) : "");
     set("f-camera", c.camera != null ? String(c.camera) : "");
     set("f-title", c.title != null ? String(c.title) : "");
@@ -1497,28 +1510,39 @@ class DreameOpenMapCardEditor extends HTMLElement {
     const states = this._hass && this._hass.states ? this._hass.states : null;
     const root = this.shadowRoot;
     if (!states || !root) return;
-    const fill = (id, prefix) => {
+    const keys = Object.keys(states).sort();
+    const vac = keys.filter((k) => k.startsWith("vacuum."));
+    const cam = keys.filter((k) => k.startsWith("camera."));
+    // garde anti-churn : hass est poussé une fois par seconde, ne pas reconstruire
+    const sig = vac.length + "|" + (vac[vac.length - 1] || "") + "#" + cam.length + "|" + (cam[cam.length - 1] || "");
+    if (this._dlSig === sig) return;
+    this._dlSig = sig;
+    const fill = (id, list) => {
       const dl = root.querySelector("#" + id);
       if (!dl) return;
-      const seen = new Set();
-      const vals = Object.keys(states).filter((k) => k.startsWith(prefix) && !seen.has(k) && seen.add(k)).sort();
       dl.innerHTML = "";
-      for (const v of vals.slice(0, 300)) {
+      for (const v of list.slice(0, 300)) {
         const o = document.createElement("option");
         o.value = v;
         dl.append(o);
       }
     };
-    fill("dl-vacuum", "vacuum.");
-    fill("dl-camera", "camera.");
+    fill("dl-vacuum", vac);
+    fill("dl-camera", cam);
   }
 
   _buildConfig() {
+    // préserve tout ce que l'éditeur ne gère pas : `type`, colors, segment_colors,
+    // et toute clé ajoutée en YAML — seuls les champs gérés sont réécrits
+    const src = this._config && typeof this._config === "object" ? this._config : {};
+    const out = {};
+    for (const k of Object.keys(src)) {
+      if (!EDITOR_MANAGED_KEYS.has(k)) out[k] = src[k];
+    }
     const val = (id) => {
       const el = this._inputs[id];
       return el ? String(el.value || "").trim() : "";
     };
-    const out = {};
     const entity = val("f-entity");
     const camera = val("f-camera");
     const title = val("f-title");

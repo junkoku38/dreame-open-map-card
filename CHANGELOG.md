@@ -1,5 +1,10 @@
 # Historique des versions
 
+## v0.3.1
+- Correctifs de l'éditeur : la config émise **préserve désormais tout le YAML existant** (type de carte, colors, segment_colors…) au lieu de le reconstruire — plus de prévisualisation cassée ni de clés perdues en sauvegardant.
+- Le champ en cours de saisie n'est plus écrasé par les rappels setConfig de HA (curseur et saisie intacts).
+- Les listes d'entités ne se reconstruisent plus à chaque mise à jour hass.
+
 ## v0.3.0
 - **Éditeur visuel** : `getConfigElement` fournit un éditeur graphique (aspirateur et caméra avec autocomplétion sur les entités réelles via datalist, titre, intervalle, 7 bascules) qui n'émet que les valeurs non par défaut (`config-changed`).
 - **Design revu** : en-tête avec badge d'icône robot et sous-ligne état/batterie, sélecteur de mode segmenté, pièces en pastilles arrondies teintées, boutons d'action à coins arrondis avec survol/activé, carte encadrée à coins arrondis, ligne « maj il y a » épurée.
