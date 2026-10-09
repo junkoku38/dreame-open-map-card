@@ -18,7 +18,7 @@
  * Licence : MIT
  */
 
-const CARD_VERSION = "0.2.1";
+const CARD_VERSION = "0.3.0";
 
 if (typeof console !== "undefined" && typeof console.info === "function") {
   console.info(
@@ -299,6 +299,11 @@ class DreameOpenMapCard extends HTMLElement {
     return { entity: vacuum, camera };
   }
 
+  static getConfigElement() {
+    if (typeof document === "undefined" || !document.createElement) return null;
+    return document.createElement("dreame-open-map-card-editor");
+  }
+
   getGridOptions() {
     return { columns: 12, min_columns: 6 };
   }
@@ -508,68 +513,113 @@ class DreameOpenMapCard extends HTMLElement {
           border-radius: var(--ha-card-border-radius, 12px);
           box-shadow: var(--ha-card-box-shadow, 0 2px 8px rgba(0,0,0,.12));
           border: 1px solid var(--ha-card-border-color, rgba(0,0,0,.08));
+          color: var(--primary-text-color, #111);
           overflow: hidden;
         }
-        .header { display: flex; align-items: center; gap: 8px; padding: 12px 14px 4px; }
-        .header .name { flex: 1; font-size: 1.05rem; font-weight: 600; color: var(--primary-text-color, #111); }
-        .header .battery, .header .state { font-size: .8rem; color: var(--secondary-text-color, #666); }
-        .header .battery ha-icon { --mdc-icon-size: 15px; vertical-align: -2px; margin-right: 2px; }
-        .toolbar { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 12px; }
+        .header { display: flex; align-items: center; gap: 10px; padding: 12px 14px 4px; }
+        .hicon {
+          flex: none; width: 34px; height: 34px; border-radius: 10px;
+          display: grid; place-items: center;
+          background: color-mix(in srgb, var(--primary-color, #1e88e5) 13%, transparent);
+          color: var(--primary-color, #1e88e5);
+        }
+        .hicon ha-icon { --mdc-icon-size: 20px; }
+        .who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+        .header .name {
+          font-size: 1rem; font-weight: 600; letter-spacing: .005em;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+          color: var(--primary-text-color, #111);
+        }
+        .header .sub { display: flex; align-items: center; gap: 8px; min-width: 0;
+                       font-size: .78rem; color: var(--secondary-text-color, #666); }
+        .header .state { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .header .battery { flex: none; margin-left: auto; display: inline-flex; align-items: center;
+                           user-select: none; -webkit-user-select: none; }
+        .header .battery ha-icon { --mdc-icon-size: 15px; margin-right: 1px; }
+        .toolbar {
+          display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px;
+          margin: 4px 12px 8px; border-radius: 12px; max-width: calc(100% - 24px);
+          background: rgba(127,127,127,.10); box-sizing: border-box;
+        }
         .toolbar button {
-          background: var(--secondary-background-color, #eee);
-          border: 0; border-radius: 999px; padding: 5px 12px;
+          border: 0; border-radius: 9px; padding: 6px 13px;
           font: inherit; font-size: .8rem; cursor: pointer;
-          color: var(--primary-text-color, #333);
+          color: var(--secondary-text-color, #555);
+          background: transparent;
+          transition: background .15s ease, color .15s ease, box-shadow .15s ease;
           user-select: none; -webkit-user-select: none;
         }
         button:disabled { opacity: .38; cursor: default; }
         .toolbar button.active {
-          background: var(--primary-color, #1e88e5);
-          color: var(--primary-text-color, #fff);
+          background: var(--card-background-color, #fff);
+          color: var(--primary-text-color, #111);
+          box-shadow: 0 1px 3px rgba(0,0,0,.16);
         }
-        .mapwrap { position: relative; margin: 4px 10px 6px; }
-        canvas { display: block; width: 100%; height: auto; border-radius: 8px;
+        .mapwrap {
+          position: relative; margin: 4px 12px 8px;
+          border-radius: 14px; overflow: hidden;
+          border: 1px solid var(--divider-color, rgba(0,0,0,.08));
+          background: var(--secondary-background-color, #f6f5f2);
+        }
+        canvas { display: block; width: 100%; height: auto;
                  touch-action: none; cursor: crosshair; background: transparent; }
         .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 8px; }
         .chips button {
-          border: 1px solid var(--divider-color, rgba(0,0,0,.12));
-          background: transparent; color: var(--primary-text-color, #333);
-          border-radius: 999px; padding: 3px 10px; font: inherit; font-size: .78rem; cursor: pointer;
+          border: 1px solid transparent;
+          background: rgba(127,127,127,.10); color: var(--primary-text-color, #333);
+          border-radius: 999px; padding: 4px 11px; font: inherit; font-size: .78rem; cursor: pointer;
           max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+          transition: background .15s ease, border-color .15s ease;
           user-select: none; -webkit-user-select: none;
         }
         .chips button.selected {
-          background: var(--primary-color, #1e88e5);
-          color: var(--primary-text-color, #fff);
-          border-color: transparent;
+          background: color-mix(in srgb, var(--primary-color, #1e88e5) 20%, transparent);
+          border-color: color-mix(in srgb, var(--primary-color, #1e88e5) 55%, transparent);
+          color: var(--primary-text-color, #222);
+          font-weight: 600;
         }
-        .actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 8px; align-items: center; }
+        .actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 12px 6px; align-items: center; }
         .actions button, .vactions button {
-          border: 0; border-radius: 999px; padding: 8px 14px;
-          font: inherit; font-size: .82rem; cursor: pointer;
+          border: 0; border-radius: 10px; height: 36px; padding: 0 14px;
+          font: inherit; font-size: .82rem; font-weight: 500; cursor: pointer;
           background: var(--primary-color, #1e88e5); color: var(--primary-text-color, #fff);
+          box-shadow: 0 1px 2px rgba(0,0,0,.18);
+          transition: filter .15s ease, transform .06s ease;
+          user-select: none; -webkit-user-select: none;
         }
+        .actions button:not(:disabled):hover, .vactions button:not(:disabled):hover { filter: brightness(1.07); }
+        .actions button:not(:disabled):active, .vactions button:not(:disabled):active { transform: translateY(1px); }
         .actions button.ghost, .vactions button.ghost {
-          background: var(--secondary-background-color, #eee);
-          color: var(--primary-text-color, #444);
+          background: rgba(127,127,127,.12); color: var(--primary-text-color, #333); box-shadow: none;
         }
-        .actions select {
-          border: 1px solid var(--divider-color, rgba(0,0,0,.2));
-          border-radius: 8px; padding: 7px 8px; font: inherit; font-size: .8rem;
+        .actions select, .vactions select {
+          height: 36px; border-radius: 10px; padding: 0 8px; font: inherit; font-size: .82rem;
+          border: 1px solid var(--divider-color, rgba(0,0,0,.15));
           background: var(--card-background-color, #fff); color: var(--primary-text-color, #333);
         }
-        .vactions { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 12px; }
-        .hint { font-size: .74rem; color: var(--secondary-text-color, #777); padding: 0 14px 10px; }
-        .error { color: var(--error-color, #b3261e); font-size: .8rem; padding: 0 14px 10px; }
-        .notice { color: var(--secondary-text-color, #777); font-size: .8rem; padding: 0 14px 10px; }
+        .vactions { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 12px 10px; }
+        .hint { font-size: .74rem; color: var(--secondary-text-color, #777); padding: 0 14px 8px; }
+        .error { color: var(--error-color, #b3261e); font-size: .8rem; padding: 0 14px 8px; }
+        .notice { color: var(--secondary-text-color, #777); font-size: .8rem; padding: 0 14px 8px; }
         .notice:empty { display: none; }
         .error:empty { display: none; }
-        .meta { font-size: .7rem; color: var(--secondary-text-color, #999); padding: 0 14px 10px; }
+        .meta { font-size: .68rem; letter-spacing: .02em; color: var(--secondary-text-color, #999); padding: 0 14px 10px; }
+        button:focus-visible, select:focus-visible, canvas:focus-visible {
+          outline: 2px solid var(--primary-color, #1e88e5); outline-offset: 2px;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .toolbar button, .chips button, .actions button, .vactions button { transition: none; }
+        }
       </style>
       <div class="header">
-        <span class="name"></span>
-        <span class="state"></span>
-        <span class="battery"></span>
+        <span class="hicon" aria-hidden="true"><ha-icon icon="mdi:robot-vacuum"></ha-icon></span>
+        <span class="who">
+          <span class="name"></span>
+          <span class="sub">
+            <span class="state"></span>
+            <span class="battery"></span>
+          </span>
+        </span>
       </div>
       <div class="toolbar"></div>
       <div class="mapwrap"><canvas role="img" aria-label="Carte du robot"></canvas></div>
@@ -825,7 +875,7 @@ class DreameOpenMapCard extends HTMLElement {
     }
     if (metaEl) {
       const secs = Math.round((Date.now() - this._lastFetchAt) / 1000);
-      metaEl.textContent = this._lastFetchAt ? `/api/camera_map_data_proxy — maj il y a ${Math.max(0, secs)}s` : "";
+      metaEl.textContent = this._lastFetchAt ? `maj il y a ${Math.max(0, secs)}s` : "";
     }
   }
 
@@ -1320,6 +1370,192 @@ const FRENCH_VACUUM_STATE = {
   unknown: "Inconnu",
 };
 
+/* ------------------------------------------------------------------ *
+ * Éditeur visuel (GUI editor)
+ * ------------------------------------------------------------------ */
+class DreameOpenMapCardEditor extends HTMLElement {
+  constructor() {
+    super();
+    this._hass = null;
+    this._config = {};
+    this._inputs = {};
+    this._built = false;
+    if (this.attachShadow) this.attachShadow({ mode: "open" });
+  }
+
+  set hass(h) {
+    this._hass = h;
+    if (this._built) this._fillDatalists();
+  }
+  get hass() { return this._hass; }
+
+  setConfig(config) {
+    this._config = config && typeof config === "object" ? { ...config } : {};
+    if (this._built) this._loadValues();
+    else this._build();
+  }
+
+  connectedCallback() {
+    if (!this._built) this._build();
+  }
+
+  focus() {
+    const first = this.shadowRoot && this.shadowRoot.querySelector("input");
+    if (first && typeof first.focus === "function") first.focus();
+  }
+
+  _build() {
+    const root = this.shadowRoot || this.attachShadow({ mode: "open" });
+    root.innerHTML = `
+      <style>
+        :host { display: block; color: var(--primary-text-color, #111); }
+        .rows { display: flex; flex-direction: column; gap: 10px; }
+        .row { display: flex; flex-direction: column; gap: 4px; }
+        .row > label { font-size: .8rem; font-weight: 600; }
+        .row input[type="text"], .row input[type="number"] {
+          width: 100%; box-sizing: border-box;
+          border: 1px solid var(--divider-color, rgba(0,0,0,.2));
+          border-radius: 8px; padding: 8px 10px;
+          font: inherit; font-size: .9rem;
+          color: var(--primary-text-color, #111);
+          background: var(--card-background-color, #fff);
+        }
+        input:focus-visible { outline: 2px solid var(--primary-color, #1e88e5); outline-offset: 1px; }
+        .toggles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 14px; }
+        @media (min-width: 700px) { .toggles { grid-template-columns: repeat(3, 1fr); } }
+        .tg { display: flex; align-items: center; gap: 8px; font-size: .85rem; cursor: pointer; }
+        .tg input { accent-color: var(--primary-color, #1e88e5); }
+        .note { font-size: .75rem; color: var(--secondary-text-color, #777); }
+      </style>
+      <div class="rows">
+        <div class="row">
+          <label for="f-entity">Aspirateur (vacuum.*)</label>
+          <input id="f-entity" type="text" list="dl-vacuum" placeholder="vacuum.mon_dreame" autocomplete="off">
+        </div>
+        <div class="row">
+          <label for="f-camera">Caméra « Données cartographiques actuelles » (camera.*)</label>
+          <input id="f-camera" type="text" list="dl-camera" placeholder="camera.mon_dreame_map_data" autocomplete="off">
+        </div>
+        <div class="row">
+          <label for="f-title">Titre (optionnel)</label>
+          <input id="f-title" type="text" placeholder="D9 Max — carte interactive">
+        </div>
+        <div class="row">
+          <label for="f-interval">Rafraîchissement de base en s (1–120, défaut 5)</label>
+          <input id="f-interval" type="number" min="1" max="120" step="1" placeholder="5">
+        </div>
+        <div class="row">
+          <label>Affichages et modes</label>
+          <div class="toggles">
+            <label class="tg"><input id="f-controls" type="checkbox" checked> Boutons aspirateur</label>
+            <label class="tg"><input id="f-rooms" type="checkbox" checked> Nettoyage par pièces</label>
+            <label class="tg"><input id="f-zone" type="checkbox" checked> Nettoyage de zone</label>
+            <label class="tg"><input id="f-goto" type="checkbox" checked> Aller à</label>
+            <label class="tg"><input id="f-follow" type="checkbox"> Suivre un chemin</label>
+            <label class="tg"><input id="f-labels" type="checkbox" checked> Noms des pièces sur la carte</label>
+            <label class="tg"><input id="f-debug" type="checkbox"> Debug (détails d'erreur)</label>
+          </div>
+        </div>
+        <div class="note">Couleurs avancées (colors, segment_colors) : à régler en mode YAML — voir le README.</div>
+        <datalist id="dl-vacuum"></datalist>
+        <datalist id="dl-camera"></datalist>
+      </div>
+    `;
+    const bind = (id) => {
+      const el = root.querySelector("#" + id);
+      this._inputs[id] = el;
+      if (el) {
+        el.addEventListener("input", () => this._emit());
+        el.addEventListener("change", () => this._emit());
+      }
+    };
+    ["entity", "camera", "title", "interval", "controls", "rooms", "zone", "goto", "follow", "labels", "debug"]
+      .forEach((id) => bind("f-" + id));
+    this._built = true;
+    this._loadValues();
+    this._fillDatalists();
+  }
+
+  _loadValues() {
+    const c = this._config || {};
+    const set = (id, v) => { const el = this._inputs[id]; if (el) el.value = v; };
+    set("f-entity", c.entity != null ? String(c.entity) : "");
+    set("f-camera", c.camera != null ? String(c.camera) : "");
+    set("f-title", c.title != null ? String(c.title) : "");
+    if (c.update_interval != null) set("f-interval", String(c.update_interval));
+    const chk = (id, v) => { const el = this._inputs[id]; if (el) el.checked = !!v; };
+    chk("f-controls", c.controls !== false);
+    chk("f-rooms", c.room_cleaning !== false);
+    chk("f-zone", c.zone_cleaning !== false);
+    chk("f-goto", c.goto !== false);
+    chk("f-follow", c.follow_path === true);
+    chk("f-labels", c.show_room_labels !== false);
+    chk("f-debug", c.debug === true);
+  }
+
+  _fillDatalists() {
+    const states = this._hass && this._hass.states ? this._hass.states : null;
+    const root = this.shadowRoot;
+    if (!states || !root) return;
+    const fill = (id, prefix) => {
+      const dl = root.querySelector("#" + id);
+      if (!dl) return;
+      const seen = new Set();
+      const vals = Object.keys(states).filter((k) => k.startsWith(prefix) && !seen.has(k) && seen.add(k)).sort();
+      dl.innerHTML = "";
+      for (const v of vals.slice(0, 300)) {
+        const o = document.createElement("option");
+        o.value = v;
+        dl.append(o);
+      }
+    };
+    fill("dl-vacuum", "vacuum.");
+    fill("dl-camera", "camera.");
+  }
+
+  _buildConfig() {
+    const val = (id) => {
+      const el = this._inputs[id];
+      return el ? String(el.value || "").trim() : "";
+    };
+    const out = {};
+    const entity = val("f-entity");
+    const camera = val("f-camera");
+    const title = val("f-title");
+    if (entity) out.entity = entity;
+    if (camera) out.camera = camera;
+    if (title) out.title = title;
+    const iv = parseInt(val("f-interval"), 10);
+    if (Number.isFinite(iv) && iv !== 5) {
+      out.update_interval = Math.max(1, Math.min(120, iv));
+    }
+    const ch = (id) => !!(this._inputs[id] && this._inputs[id].checked);
+    // les options fausses par défaut ne sont écrites que quand cochées ;
+    // les vraies par défaut ne sont écrites que quand décochées
+    if (!ch("f-controls")) out.controls = false;
+    if (!ch("f-rooms")) out.room_cleaning = false;
+    if (!ch("f-zone")) out.zone_cleaning = false;
+    if (!ch("f-goto")) out.goto = false;
+    if (!ch("f-labels")) out.show_room_labels = false;
+    if (ch("f-follow")) out.follow_path = true;
+    if (ch("f-debug")) out.debug = true;
+    return out;
+  }
+
+  _emit() {
+    const config = this._buildConfig();
+    try {
+      this.dispatchEvent(new CustomEvent("config-changed", {
+        detail: { config },
+        bubbles: true,
+        composed: true,
+      }));
+    } catch (e) {
+      /* environnement sans CustomEvent : rien à propager */
+    }
+  }
+}
+
 /* enregistrement ---------------------------------------------------------- */
 if (typeof window !== "undefined") {
   window.customCards = window.customCards || [];
@@ -1333,6 +1569,9 @@ if (typeof window !== "undefined") {
   });
   if (typeof customElements !== "undefined" && !customElements.get("dreame-open-map-card")) {
     customElements.define("dreame-open-map-card", DreameOpenMapCard);
+  }
+  if (typeof customElements !== "undefined" && !customElements.get("dreame-open-map-card-editor")) {
+    customElements.define("dreame-open-map-card-editor", DreameOpenMapCardEditor);
   }
 }
 

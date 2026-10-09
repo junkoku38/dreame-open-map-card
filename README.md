@@ -50,6 +50,10 @@ Paramètres → Tableaux de bord → Ressources → + Ressource :
 
 ## Configuration
 
+Éditeur graphique disponible : ajoutez la carte via l'éditeur Lovelace, un formulaire pré-rempli
+(autocomplétion sur vos entités `vacuum.*` et `camera.*`) s'ouvre et n'écrit que les valeurs
+différentes des défauts.
+
 ```yaml
 type: custom:dreame-open-map-card
 entity: vacuum.mon_dreame

@@ -1,5 +1,10 @@
 # Historique des versions
 
+## v0.3.0
+- **Éditeur visuel** : `getConfigElement` fournit un éditeur graphique (aspirateur et caméra avec autocomplétion sur les entités réelles via datalist, titre, intervalle, 7 bascules) qui n'émet que les valeurs non par défaut (`config-changed`).
+- **Design revu** : en-tête avec badge d'icône robot et sous-ligne état/batterie, sélecteur de mode segmenté, pièces en pastilles arrondies teintées, boutons d'action à coins arrondis avec survol/activé, carte encadrée à coins arrondis, ligne « maj il y a » épurée.
+- Accessibilité : `:focus-visible` sur les contrôles, `prefers-reduced-motion` respecté.
+
 ## v0.2.1
 - Batterie désormais fiable sur dreame-vacuum : attribut standard `battery_level` avec repli sur `battery` (seul attribut exposé par l'intégration) ; icônes mdi graduées (charge, niveaux, rouge sous 20 %).
 - `getStubConfig` : pré-remplissage automatique de la configuration dans l'éditeur (aspirateur + caméra assortie).
