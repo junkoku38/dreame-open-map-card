@@ -36,8 +36,10 @@ Carte interactive pour l'intégration Home Assistant
 ### HACS (recommandé)
 
 1. HACS → **Intégrations/Cartes personnalisées** → menu → *Dépôts personnalisés*
-2. URL du dépôt : celui de ce projet, catégorie **Interface (Lovelace)**
+2. URL du dépôt : `https://github.com/junkoku38/dreame-open-map-card`, catégorie **Interface (Lovelace)**
 3. Installer « Dreame Open Map Card ».
+4. Paramètres → Tableaux de bord → Ressources : si HACS ne l'a pas offerte,
+   ajouter `/hacsfiles/dreame-open-map-card/dreame-open-map-card.js` — type **Module JavaScript**.
 
 ### Manuel
 

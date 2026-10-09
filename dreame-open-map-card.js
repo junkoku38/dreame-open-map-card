@@ -1182,8 +1182,7 @@ if (typeof window !== "undefined") {
     description:
       "Carte interactive (pièces / zones / aller à) pour l'intégration dreame-vacuum — open source, sans clé de licence.",
     preview: false,
-    // NB : adapte cette URL à l'endroit où tu publieras le dépôt.
-    documentationURL: "https://github.com/paul/dreame-open-map-card",
+    documentationURL: "https://github.com/junkoku38/dreame-open-map-card",
   });
   if (typeof customElements !== "undefined" && !customElements.get("dreame-open-map-card")) {
     customElements.define("dreame-open-map-card", DreameOpenMapCard);
