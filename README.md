@@ -55,7 +55,7 @@ type: custom:dreame-open-map-card
 entity: vacuum.mon_dreame
 camera: camera.mon_dreame_map_data
 title: "Robot du salon"            # optionnel
-update_interval: 5                 # rafraîchissement base, en s (défaut 5)
+update_interval: 5                 # rafraîchissement base, en s (1–120, défaut 5)
 controls: true                     # boutons Nettoyer/Pause/Stop/Base/Localiser
 room_cleaning: true
 zone_cleaning: true
@@ -78,6 +78,7 @@ Champs requis : `entity` (aspirateur) et `camera` (l'entité `map_data`).
 | --- | --- |
 | « Entité camera introuvable » | Activer l'entité *Données cartographiques actuelles* (elle est désactivée par défaut). |
 | Carte vide | Lancer un nettoyage complet une fois pour que le robot produise la première carte. |
+| Une pièce n'apparaît pas | Si la pièce a été rendue invisible dans l'app robot (visibilité désactivée), la carte la masque aussi, comme le renderer officiel. |
 | Carte qui ne bouge pas | Recharger la page (F5) puis vérifier `update_interval`; le navigateur met `/api/...` en cache, la carte applique un cache-buster automatiquement. |
 | Pastilles sans noms | Nommer les pièces dans l'app Mi Home / Dreamehome, puis forcer un `vacuum_reload_maps` (service de l'intégration). |
 
