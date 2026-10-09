@@ -1,5 +1,9 @@
 # Historique des versions
 
+## v0.3.2
+- **Autocomplétion réparée** : remplacement du `<datalist>` natif (qui ne s'affiche pas dans un shadow DOM sous Chromium) par un dropdown maison — filtrage live, navigation clavier (flèches / Entrée / Échap), clic pour appliquer.
+- Correctifs v0.3.1 reconduits : YAML existant préservé (`type`, `colors`…) dans `config-changed`, champ en cours de saisie non écrasé.
+
 ## v0.3.1
 - Correctifs de l'éditeur : la config émise **préserve désormais tout le YAML existant** (type de carte, colors, segment_colors…) au lieu de le reconstruire — plus de prévisualisation cassée ni de clés perdues en sauvegardant.
 - Le champ en cours de saisie n'est plus écrasé par les rappels setConfig de HA (curseur et saisie intacts).

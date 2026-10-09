@@ -18,7 +18,7 @@
  * Licence : MIT
  */
 
-const CARD_VERSION = "0.3.1";
+const CARD_VERSION = "0.3.2";
 
 if (typeof console !== "undefined" && typeof console.info === "function") {
   console.info(
@@ -1386,12 +1386,16 @@ class DreameOpenMapCardEditor extends HTMLElement {
     this._config = {};
     this._inputs = {};
     this._built = false;
+    this._pools = { vacuum: [], camera: [] };
+    this._dlSig = null;
+    this._sugg = {};
+    this._suggInput = {};
     if (this.attachShadow) this.attachShadow({ mode: "open" });
   }
 
   set hass(h) {
     this._hass = h;
-    if (this._built) this._fillDatalists();
+    if (this._built) this._refreshPools();
   }
   get hass() { return this._hass; }
 
@@ -1416,7 +1420,7 @@ class DreameOpenMapCardEditor extends HTMLElement {
       <style>
         :host { display: block; color: var(--primary-text-color, #111); }
         .rows { display: flex; flex-direction: column; gap: 10px; }
-        .row { display: flex; flex-direction: column; gap: 4px; }
+        .row { display: flex; flex-direction: column; gap: 4px; position: relative; }
         .row > label { font-size: .8rem; font-weight: 600; }
         .row input[type="text"], .row input[type="number"] {
           width: 100%; box-sizing: border-box;
@@ -1427,6 +1431,23 @@ class DreameOpenMapCardEditor extends HTMLElement {
           background: var(--card-background-color, #fff);
         }
         input:focus-visible { outline: 2px solid var(--primary-color, #1e88e5); outline-offset: 1px; }
+        .sugg {
+          position: absolute; left: 0; right: 0; top: 100%;
+          z-index: 30; max-height: 190px; overflow: auto;
+          background: var(--card-background-color, #fff);
+          border: 1px solid var(--divider-color, rgba(0,0,0,.25));
+          border-radius: 8px;
+          box-shadow: 0 4px 14px rgba(0,0,0,.28);
+        }
+        .sugg[hidden] { display: none; }
+        .sugg div {
+          padding: 7px 10px; font-size: .85rem; cursor: pointer;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+          color: var(--primary-text-color, #222);
+        }
+        .sugg div:hover, .sugg div.hl {
+          background: color-mix(in srgb, var(--primary-color, #1e88e5) 15%, transparent);
+        }
         .toggles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 14px; }
         @media (min-width: 700px) { .toggles { grid-template-columns: repeat(3, 1fr); } }
         .tg { display: flex; align-items: center; gap: 8px; font-size: .85rem; cursor: pointer; }
@@ -1436,11 +1457,13 @@ class DreameOpenMapCardEditor extends HTMLElement {
       <div class="rows">
         <div class="row">
           <label for="f-entity">Aspirateur (vacuum.*)</label>
-          <input id="f-entity" type="text" list="dl-vacuum" placeholder="vacuum.mon_dreame" autocomplete="off">
+          <input id="f-entity" type="text" placeholder="vacuum.mon_dreame" autocomplete="off" spellcheck="false">
+          <div class="sugg" id="sw-entity" hidden></div>
         </div>
         <div class="row">
           <label for="f-camera">Caméra « Données cartographiques actuelles » (camera.*)</label>
-          <input id="f-camera" type="text" list="dl-camera" placeholder="camera.mon_dreame_map_data" autocomplete="off">
+          <input id="f-camera" type="text" placeholder="camera.mon_dreame_map_data" autocomplete="off" spellcheck="false">
+          <div class="sugg" id="sw-camera" hidden></div>
         </div>
         <div class="row">
           <label for="f-title">Titre (optionnel)</label>
@@ -1463,8 +1486,6 @@ class DreameOpenMapCardEditor extends HTMLElement {
           </div>
         </div>
         <div class="note">Couleurs avancées (colors, segment_colors) : à régler en mode YAML — voir le README.</div>
-        <datalist id="dl-vacuum"></datalist>
-        <datalist id="dl-camera"></datalist>
       </div>
     `;
     const bind = (id) => {
@@ -1477,9 +1498,13 @@ class DreameOpenMapCardEditor extends HTMLElement {
     };
     ["entity", "camera", "title", "interval", "controls", "rooms", "zone", "goto", "follow", "labels", "debug"]
       .forEach((id) => bind("f-" + id));
+    this._sugg = {};
+    this._suggInput = {};
+    this._suggestSetup(root.querySelector("#f-entity"), root.querySelector("#sw-entity"), "vacuum");
+    this._suggestSetup(root.querySelector("#f-camera"), root.querySelector("#sw-camera"), "camera");
     this._built = true;
     this._loadValues();
-    this._fillDatalists();
+    this._refreshPools();
   }
 
   _loadValues() {
@@ -1506,29 +1531,95 @@ class DreameOpenMapCardEditor extends HTMLElement {
     chk("f-debug", c.debug === true);
   }
 
-  _fillDatalists() {
+  /* --- autocomplétion maison : le <datalist> natif ne fonctionne pas dans un
+     shadow DOM sous Chromium → dropdown DOM classique, robuste partout --- */
+  _refreshPools() {
     const states = this._hass && this._hass.states ? this._hass.states : null;
-    const root = this.shadowRoot;
-    if (!states || !root) return;
+    if (!states) return;
     const keys = Object.keys(states).sort();
-    const vac = keys.filter((k) => k.startsWith("vacuum."));
-    const cam = keys.filter((k) => k.startsWith("camera."));
+    const vac = keys.filter((k) => k.startsWith("vacuum.")).slice(0, 300);
+    const cam = keys.filter((k) => k.startsWith("camera.")).slice(0, 300);
     // garde anti-churn : hass est poussé une fois par seconde, ne pas reconstruire
     const sig = vac.length + "|" + (vac[vac.length - 1] || "") + "#" + cam.length + "|" + (cam[cam.length - 1] || "");
     if (this._dlSig === sig) return;
     this._dlSig = sig;
-    const fill = (id, list) => {
-      const dl = root.querySelector("#" + id);
-      if (!dl) return;
-      dl.innerHTML = "";
-      for (const v of list.slice(0, 300)) {
-        const o = document.createElement("option");
-        o.value = v;
-        dl.append(o);
-      }
-    };
-    fill("dl-vacuum", vac);
-    fill("dl-camera", cam);
+    this._pools.vacuum = vac;
+    this._pools.camera = cam;
+  }
+
+  _suggestSetup(input, sugg, poolId) {
+    if (!input || !sugg) return;
+    sugg._poolId = poolId;
+    sugg._input = input;
+    this._sugg[poolId === "vacuum" ? "entity" : "camera"] = sugg;
+    this._suggInput[poolId === "vacuum" ? "entity" : "camera"] = input;
+    input.addEventListener("input", () => this._showSugg(input, sugg, poolId));
+    input.addEventListener("focus", () => this._showSugg(input, sugg, poolId));
+    input.addEventListener("blur", () => { sugg.hidden = true; });
+    input.addEventListener("keydown", (e) => this._suggKeys(input, sugg, e));
+    sugg.addEventListener("mousedown", (e) => this._suggPick(e, sugg));
+  }
+
+  _showSugg(input, sugg, poolId) {
+    if (!input || !sugg) return;
+    const pool = (this._pools && this._pools[poolId]) || [];
+    const q = String(input.value || "").trim().toLowerCase();
+    let list = q ? pool.filter((v) => v.toLowerCase().includes(q)) : pool;
+    list = list.slice(0, 40);
+    sugg.innerHTML = "";
+    for (const v of list) {
+      const d = document.createElement("div");
+      d.setAttribute("data-v", v);
+      d.textContent = v;
+      sugg.append(d);
+    }
+    sugg._hl = -1;
+    sugg.hidden = list.length === 0;
+  }
+
+  _suggKeys(input, sugg, e) {
+    const k = e && e.key;
+    if (k === "Escape") { sugg.hidden = true; if (e.preventDefault) e.preventDefault(); return; }
+    if (sugg.hidden) return;
+    const items = sugg.children || [];
+    const n = items.length;
+    if (!n) return;
+    const hl = typeof sugg._hl === "number" ? sugg._hl : -1;
+    if (k === "ArrowDown") {
+      sugg._hl = Math.min(n - 1, hl + 1);
+      this._paintHl(sugg);
+      if (e.preventDefault) e.preventDefault();
+    } else if (k === "ArrowUp") {
+      sugg._hl = Math.max(0, hl - 1);
+      this._paintHl(sugg);
+      if (e.preventDefault) e.preventDefault();
+    } else if (k === "Enter") {
+      const it = items[hl >= 0 ? hl : 0];
+      if (it) { if (e.preventDefault) e.preventDefault(); this._applySugg(input, sugg, it); }
+    }
+  }
+
+  _paintHl(sugg) {
+    const items = sugg.children || [];
+    for (let i = 0; i < items.length; i++) {
+      const c = items[i];
+      const base = String(c.className || "").replace(/\bhl\b/g, "").trim();
+      c.className = i === sugg._hl ? (base ? base + " hl" : "hl") : base;
+    }
+  }
+
+  _suggPick(e, sugg) {
+    const t = e && e.target;
+    if (!t || t === sugg) return;
+    this._applySugg(sugg._input, sugg, t);
+  }
+
+  _applySugg(input, sugg, item) {
+    const v = item && item.getAttribute ? item.getAttribute("data-v") : null;
+    if (!input || !v) return;
+    input.value = v;
+    sugg.hidden = true;
+    this._emit();
   }
 
   _buildConfig() {
