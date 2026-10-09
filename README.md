@@ -64,9 +64,24 @@ goto: true                         # mode "Aller à"
 follow_path: false                 # mode "Suivre un chemin"
 show_room_labels: true
 # colors:                          # surcharges de couleurs (optionnel)
-#   floor: "#ece9e1"
-#   wall: "#9aa0a6"
-# segment_colors:                  # palette des pièces (optionnel)
+#   floor: "#ece9e1"               # sol cartographié hors pièces
+#   wall: "#9aa0a6"                # murs et contours
+#   carpet: "rgba(178, 132, 84, 0.30)"     # tapis (remplissage)
+#   carpetStroke: "rgba(178, 132, 84, 0.6)"
+#   obstacle: "#5c636e"            # pixels d'obstacle
+#   path: "#1e88e5"                # trajectoire du robot
+#   pathMove: "#90a4ae"            # trajectoire (déplacements sans aspiration)
+#   activeSegment: "rgba(30, 136, 229, 0.45)"   # pièce en cours de nettoyage
+#   selectedSegment: "rgba(255, 152, 0, 0.45)"  # pièces sélectionnées
+#   activeArea: "rgba(76, 175, 80, 0.30)"       # zone active (robot en tâche)
+#   pendingZone: "rgba(30, 136, 229, 0.30)"     # rectangle dessiné (nettoyage de zone)
+#   point: "#43a047"               # points posés (aller à / chemin)
+#   virtualWall: "#e53935"         # murs virtuels
+#   noGo: "rgba(229, 57, 53, 0.22)"    # zones interdites
+#   noMop: "rgba(170, 47, 255, 0.22)"  # zones sans lavage
+#   background: "var(--card-background-color, #ffffff)"
+#   label: "#37474f"               # texte des noms de pièces
+# segment_colors:                  # palette des pièces (optionnel ; 16 couleurs par défaut)
 #   - "rgb(99, 181, 245)"
 #   - "rgb(245, 183, 74)"
 ```
